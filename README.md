@@ -1,5 +1,5 @@
 # Aws_Organisational_Unit-Control-Tower
-AWS Account Automation – Sprint 1
+
 
 # Purpose
 Sprint-1 focuses only on setting up the GitHub repository and workflow.
