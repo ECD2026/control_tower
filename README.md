@@ -6,13 +6,11 @@ Sprint-1 focuses only on setting up the GitHub repository and workflow.
 No infrastructure or automation is implemented yet.
 
 # What Was Done
-Repository created
-Team members added
-Branching strategy defined
-Folder structure initialized
-Branch protection rules enabled
-Pull Request workflow set up
-Sprint-1 milestone created
+-Repository created
+-Team members added
+-Branching strategy defined
+-Branch protection rules enabled
+-Sprint-1 milestone created
 
 # Branch Strategy
 main → Production branch
