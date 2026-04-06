@@ -1,4 +1,4 @@
-# 🚀 FICO AWS Account Automation Platform
+# 🚀 AWS Account Automation Platform
 
 ## 📌 Overview
 
