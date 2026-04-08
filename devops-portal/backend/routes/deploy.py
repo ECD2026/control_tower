@@ -156,7 +156,7 @@ async def run_deployment(
 
     except Exception as exc:
         deployment_statuses[deployment_id] = "failed"
-        await log(f"[ERROR] {exc}")
+        await log(f"[ERROR] {type(exc).__name__}: {exc}")
 
     finally:
         update_deployment_status(
