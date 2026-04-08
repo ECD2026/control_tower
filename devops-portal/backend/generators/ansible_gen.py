@@ -151,10 +151,19 @@ def generate_ansible(request) -> str:
         update_cache: yes""")
             else:
                 tasks.append("""\
-    - name: Install NodeJS
+    - name: Install NodeJS (Amazon Linux / RHEL compatible)
       shell: |
-        curl -fsSL https://rpm.nodesource.com/setup_18.x | bash -
-        yum install -y nodejs
+        set -e
+        if command -v amazon-linux-extras >/dev/null 2>&1; then
+          amazon-linux-extras enable nodejs >/dev/null 2>&1 || true
+          amazon-linux-extras install -y nodejs
+        elif yum install -y nodejs; then
+          echo "Installed nodejs from OS repositories"
+        else
+          # Fallback for older glibc hosts: prefer NodeSource 16.x over 18.x
+          curl -fsSL https://rpm.nodesource.com/setup_16.x | bash -
+          yum install -y nodejs
+        fi
       args:
         executable: /bin/bash""")
 
