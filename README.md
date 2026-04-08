@@ -17,7 +17,7 @@ Provide real-time logs and deployment status tracking
 # System Architecture
 <img width="2662" height="1088" alt="image" src="https://github.com/user-attachments/assets/64f84a4c-7b90-43a7-ad1a-8
 
-STEP 1:- User fills form:
+# STEP 1:- User fills form:
 
 Cloud provider, region, instance type
 Packages (Docker, Nginx, etc.)
