@@ -15,31 +15,9 @@ Ensure secure and scalable deployments on AWS
 Provide real-time logs and deployment status tracking
 
 # System Architecture
-<img width="2662" height="1088" alt="image" src="https://github.com/user-attachments/assets/64f84a4c-7b90-43a7-ad1a-80a5008f6f5f" />
+<img width="2662" height="1088" alt="image" src="https://github.com/user-attachments/assets/64f84a4c-7b90-43a7-ad1a-8
 
-
-# Project Structure
-project-root/
-│
-├── frontend/              # Dashboard
-│   ├── components/
-│   ├── pages/
-│
-├── backend/               # Server
-│   ├── main.py
-│   ├── services/
-│   │   ├── terraform.py
-│   │   ├── ansible.py
-│
-├── generated/             # Auto-generated files
-│   ├── main.tf
-│   ├── setup.yml
-│
-└── README.md
-⚙️ Workflow (End-to-End)
-1️⃣ User Input (Frontend)
-
-# STEP 1:- User fills form:
+STEP 1:- User fills form:
 
 Cloud provider, region, instance type
 Packages (Docker, Nginx, etc.)
