@@ -19,11 +19,27 @@ def generate_ansible(request) -> str:
         cache_valid_time: 3600""")
     else:
         tasks.append("""\
+    - name: Wait for yum or dnf locks to clear
+      shell: |
+        for i in {1..30}; do
+          if [ ! -f /var/run/yum.pid ] && [ ! -f /var/cache/dnf/metadata_lock.pid ] && [ ! -f /var/lib/rpm/.rpm.lock ]; then
+            exit 0
+          fi
+          sleep 10
+        done
+        echo "Package manager lock did not clear in time"
+        exit 1
+      args:
+        executable: /bin/bash
+      changed_when: false
+
     - name: Update yum cache
       yum:
-        name: "*"
-        state: latest
-        update_cache: yes""")
+        update_cache: yes
+      register: yum_cache_update
+      retries: 5
+      delay: 20
+      until: yum_cache_update is succeeded""")
 
     # ── Common packages ──────────────────────────────────────────────────────
     for pkg in request.packages:
