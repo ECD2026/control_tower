@@ -77,7 +77,8 @@ provider "aws" {{
 
 # ---------- Security Group ----------
 resource "aws_security_group" "devops_portal_sg" {{
-  name        = "devops-portal-sg"
+  # Use a prefix so repeated deployments do not fail on duplicate SG names.
+  name_prefix = "devops-portal-sg-"
   description = "Managed by DevOps Automation Portal"
 {ingress_blocks}
 

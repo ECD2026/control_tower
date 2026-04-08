@@ -1,23 +1,72 @@
-name: Terraform Deploy
+name: Terraform CI/CD
 
 on:
+  pull_request:
+    branches:
+      - main
+      - develop
+    paths:
+      - "terraform/**"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
   push:
     branches:
       - main
+      - develop
+    paths:
+      - "terraform/**"
+      - ".github/workflows/deploy.yml"
 
 permissions:
   id-token: write
   contents: read
 
+env:
+  AWS_REGION: ap-south-1
+  AWS_ROLE_TO_ASSUME: arn:aws:iam::053020126202:role/GitHubTerraformRole
+  TF_IN_AUTOMATION: true
+  TF_WORKING_DIR: terraform
+
 jobs:
-  deploy:
+  terraform:
+    name: Terraform
     runs-on: ubuntu-latest
+    concurrency:
+      group: terraform-${{ github.ref }}
+      cancel-in-progress: false
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Configure AWS Credentials
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.8.5
+
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::053020126202:role/GitHubTerraformRole
-          aws-region: ap-south-1
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform fmt
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform fmt -check -recursive
+
+      - name: Terraform init
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform init -input=false
+
+      - name: Terraform validate
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform validate
+
+      - name: Terraform plan
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform plan -input=false -out=tfplan
+
+      - name: Terraform apply
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform apply -input=false -auto-approve tfplan
