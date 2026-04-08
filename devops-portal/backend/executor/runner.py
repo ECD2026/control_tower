@@ -15,24 +15,51 @@ import threading
 from typing import AsyncGenerator
 
 
-def _resolve_command(cmd_name: str) -> str:
-    """Resolve a command to its full path."""
-    # Hard-coded known locations first
-    known_paths = {
-        "terraform": r"C:\Users\Asus\develop\terraform\terraform.exe",
-        "ansible-playbook": (
-            r"C:\Users\Asus\AppData\Local\Programs\Python"
-            r"\Python312\Scripts\ansible-playbook.exe"
-        ),
-    }
-    if cmd_name in known_paths:
-        path = known_paths[cmd_name]
-        if os.path.exists(path):
-            return path
+TERRAFORM_EXE = r"C:\Users\Asus\develop\terraform\terraform.exe"
 
-    # Fall back to PATH search
-    found = shutil.which(cmd_name)
-    return found if found else cmd_name
+# Ansible is NOT supported on Windows as a control node (os.get_blocking fails).
+# Route all Ansible commands through WSL (Ubuntu) which has ansible installed
+# and a proper UTF-8 locale.
+WSL_EXE = r"C:\Windows\System32\wsl.exe"
+
+
+def _win_to_wsl(path: str) -> str:
+    """Convert a Windows path to its WSL /mnt/... equivalent."""
+    # e.g. C:\Users\Asus\Temp\foo.ini → /mnt/c/Users/Asus/Temp/foo.ini
+    path = path.replace("\\", "/")
+    if len(path) >= 2 and path[1] == ":":
+        drive = path[0].lower()
+        path = f"/mnt/{drive}{path[2:]}"
+    return path
+
+
+def _resolve_command(cmd: list[str]) -> list[str]:
+    """
+    Resolve a command list to its full invocation.
+
+    - terraform      → Windows .exe (works fine natively)
+    - ansible-*      → WSL ansible-playbook (avoids Windows locale / blocking-IO issues)
+    """
+    name = cmd[0]
+
+    if name == "terraform":
+        exe = TERRAFORM_EXE if os.path.exists(TERRAFORM_EXE) else shutil.which("terraform") or "terraform"
+        return [exe] + cmd[1:]
+
+    if name == "ansible-playbook":
+        # Convert every Windows path argument to a WSL path
+        wsl_args = []
+        for arg in cmd[1:]:
+            # Convert if it looks like a Windows absolute path
+            if len(arg) >= 3 and arg[1] == ":" and arg[2] in ("\\/"):
+                wsl_args.append(_win_to_wsl(arg))
+            else:
+                wsl_args.append(arg)
+        return [WSL_EXE, "--", "ansible-playbook"] + wsl_args
+
+    # Generic fallback
+    found = shutil.which(name)
+    return [found or name] + cmd[1:]
 
 
 def _stream_process(cmd: list[str], cwd: str, env: dict, line_queue: queue.Queue) -> int:
@@ -69,10 +96,14 @@ async def execute_command(
     """
     env = os.environ.copy()
     env["ANSIBLE_HOST_KEY_CHECKING"] = "False"
+    # Force UTF-8 so Ansible doesn't fail on Windows-1252 locale
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["LC_ALL"] = "en_US.UTF-8"
     if extra_env:
         env.update(extra_env)
 
-    resolved_cmd = [_resolve_command(cmd[0])] + cmd[1:]
+    resolved_cmd = _resolve_command(cmd)
 
     # Thread-safe queue to bridge the sync subprocess thread and async caller
     line_queue: queue.Queue = queue.Queue()

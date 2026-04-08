@@ -23,7 +23,27 @@
       "Bash(mkdir -p ~/.ssh)",
       "Bash(cp \"/c/Users/Asus/Documents/SEM6/ECD/vle5/my-key.pem\" ~/.ssh/my-key.pem)",
       "Bash(chmod 600 ~/.ssh/my-key.pem)",
-      "Read(//c/Users/Asus/.ssh/**)"
+      "Read(//c/Users/Asus/.ssh/**)",
+      "Bash(curl -s \"http://localhost:8000/api/history/8251e195-7c5c-4935-a5db-8eddce859da3\")",
+      "Bash(cp \"/c/Users/Asus/Downloads/automatic.pem\" ~/.ssh/automatic.pem)",
+      "Bash(chmod 600 ~/.ssh/automatic.pem)",
+      "Bash(python3 -X utf8 -c \"import ansible; print\\(ansible.__file__\\)\")",
+      "Bash(/c/Users/Asus/AppData/Local/Programs/Python/Python312/python.exe -X utf8 -c 'import ansible; print\\(ansible.__file__\\)')",
+      "Bash(/c/Users/Asus/AppData/Local/Programs/Python/Python312/python.exe -X utf8 -c ':*)",
+      "Bash(/c/Users/Asus/AppData/Local/Programs/Python/Python312/python.exe -X utf8 -m ansible --version)",
+      "Bash(curl -s \"http://localhost:8000/api/history/addc0d1c-7bf9-4133-9699-d543286991fd\")",
+      "Bash(/c/Users/Asus/AppData/Local/Programs/Python/Python312/python.exe -c ':*)",
+      "Bash(wsl --status)",
+      "Bash(wsl -l -v)",
+      "Bash(wsl -- ansible --version)",
+      "Bash(wsl -- which ansible-playbook)",
+      "Bash(wsl -- python3 -c \"import locale; print\\(locale.getpreferredencoding\\(\\)\\)\")",
+      "Bash(wsl -- bash -c \"mkdir -p ~/.ssh && cp /mnt/c/Users/Asus/.ssh/automatic.pem ~/.ssh/automatic.pem && chmod 600 ~/.ssh/automatic.pem && ls -la ~/.ssh/automatic.pem\")",
+      "Bash(wsl -- ansible-playbook --version)",
+      "Bash(wsl -- cat ~/.ansible.cfg)",
+      "Bash(wsl -- bash -c \"ls -la ~/.ssh/ 2>/dev/null\")",
+      "Bash(wsl -- python3 -c \"import locale; print\\('Encoding:', locale.getpreferredencoding\\(\\)\\)\")",
+      "Bash(wsl -- which ssh)"
     ]
   }
 }

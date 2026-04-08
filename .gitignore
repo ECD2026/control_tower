@@ -53,3 +53,4 @@ deployments.db
 
 # Environment files
 .env
+.env.example

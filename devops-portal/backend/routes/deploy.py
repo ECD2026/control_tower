@@ -12,7 +12,7 @@ import os
 import tempfile
 import uuid
 from datetime import datetime, timezone
-from typing import Dict, List
+from typing import Awaitable, Callable, Dict, List
 
 from fastapi import APIRouter, BackgroundTasks
 from fastapi.responses import StreamingResponse
@@ -25,14 +25,83 @@ from models.schemas import DeploymentRequest, DeploymentResponse
 
 router = APIRouter()
 
+SSH_CONNECT_TIMEOUT_SECONDS = 5
+SSH_WAIT_INTERVAL_SECONDS = 5
+SSH_WAIT_TIMEOUT_SECONDS = 300
+WSL_SSH_KEY_DIR = "/home/asus/.ssh"
+
 # ---------- In-memory state for active deployments ----------
 active_queues: Dict[str, asyncio.Queue] = {}
 deployment_statuses: Dict[str, str] = {}
 deployment_logs_store: Dict[str, List[str]] = {}
+LogFn = Callable[[str], Awaitable[None]]
 
 
 def _ts() -> str:
     return datetime.now(timezone.utc).strftime("%H:%M:%S")
+
+
+async def _wait_for_ssh(
+    ip: str,
+    ssh_user: str,
+    ssh_key_path: str,
+    work_dir: str,
+    log: LogFn,
+) -> None:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + SSH_WAIT_TIMEOUT_SECONDS
+    attempt = 1
+    target = f"{ssh_user}@{ip}"
+
+    while True:
+        await log(f"[{_ts()}] Waiting for SSH on {ip} (attempt {attempt})")
+        try:
+            async for line in execute_command(
+                [
+                    "wsl",
+                    "--",
+                    "ssh",
+                    "-i",
+                    ssh_key_path,
+                    "-o",
+                    "BatchMode=yes",
+                    "-o",
+                    f"ConnectTimeout={SSH_CONNECT_TIMEOUT_SECONDS}",
+                    "-o",
+                    "ConnectionAttempts=1",
+                    "-o",
+                    "StrictHostKeyChecking=no",
+                    "-o",
+                    "UserKnownHostsFile=/dev/null",
+                    target,
+                    "true",
+                ],
+                work_dir,
+            ):
+                if line:
+                    await log(f"[SSH] {line}")
+
+            await log(f"[{_ts()}] SSH ready on {ip}")
+            return
+        except RuntimeError as exc:
+            error_text = str(exc)
+            if "Identity file" in error_text and "not accessible" in error_text:
+                raise RuntimeError(
+                    f"SSH key is not accessible in WSL: {ssh_key_path}"
+                ) from exc
+
+            if loop.time() >= deadline:
+                raise TimeoutError(
+                    f"SSH did not become ready on {ip} within "
+                    f"{SSH_WAIT_TIMEOUT_SECONDS} seconds."
+                ) from exc
+
+            await log(
+                f"[SSH] {ip} is not ready yet; retrying in "
+                f"{SSH_WAIT_INTERVAL_SECONDS} seconds..."
+            )
+            await asyncio.sleep(SSH_WAIT_INTERVAL_SECONDS)
+            attempt += 1
 
 
 # ---------- Core execution logic ----------
@@ -119,17 +188,24 @@ async def run_deployment(
 
                 # ── Build Ansible inventory ──────────────────────────────────
                 ssh_user = "ubuntu" if request.os_type == "ubuntu" else "ec2-user"
+                ssh_key_path = f"{WSL_SSH_KEY_DIR}/{request.key_pair_name}.pem"
                 inv_lines = ["[servers]"]
                 for i, ip in enumerate(ips):
                     inv_lines.append(
                         f"server{i + 1} ansible_host={ip} "
                         f"ansible_user={ssh_user} "
-                        f"ansible_ssh_private_key_file=~/.ssh/{request.key_pair_name}.pem"
+                        # WSL home directory — key must exist at ~/.ssh/ inside WSL
+                        f"ansible_ssh_private_key_file={ssh_key_path}"
                     )
                 inventory_path = os.path.join(work_dir, "inventory.ini")
                 with open(inventory_path, "w") as fh:
                     fh.write("\n".join(inv_lines) + "\n")
                 await log(f"[{_ts()}] ✔  Ansible inventory written")
+
+                # ── Wait for SSH ─────────────────────────────────────────────
+                await log(f"[{_ts()}] Waiting for SSH to become available...")
+                for ip in ips:
+                    await _wait_for_ssh(ip, ssh_user, ssh_key_path, work_dir, log)
 
                 # ── Run Ansible ──────────────────────────────────────────────
                 await log(f"[{_ts()}] Running: ansible-playbook")
