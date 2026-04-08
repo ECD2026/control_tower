@@ -1,34 +1,96 @@
-# Aws_Organisational_Unit-Control-Tower
+## AWS Organizational Unit Control Tower
+(DevOps Automation Portal)
+
+# Overview
+
+This project implements an end-to-end DevOps Automation Portal that enables users to provision and manage AWS infrastructure through a web-based interface.
+
+The system integrates Terraform, Ansible, and FastAPI to automate infrastructure provisioning, server configuration, and deployment, simulating a real-world enterprise DevOps environment with minimal manual intervention.
+
+# Objectives
+Automate infrastructure provisioning using Infrastructure as Code (IaC)
+Provide a self-service web portal for DevOps operations
+Enable dynamic generation of Terraform and Ansible configurations
+Ensure secure and scalable deployments on AWS
+Provide real-time logs and deployment status tracking
+
+# System Architecture
+<img width="2662" height="1088" alt="image" src="https://github.com/user-attachments/assets/64f84a4c-7b90-43a7-ad1a-80a5008f6f5f" />
 
 
-# Purpose
-Sprint-1 focuses only on setting up the GitHub repository and workflow.
-No infrastructure or automation is implemented yet.
+# Project Structure
+project-root/
+│
+├── frontend/              # Dashboard
+│   ├── components/
+│   ├── pages/
+│
+├── backend/               # Server
+│   ├── main.py
+│   ├── services/
+│   │   ├── terraform.py
+│   │   ├── ansible.py
+│
+├── generated/             # Auto-generated files
+│   ├── main.tf
+│   ├── setup.yml
+│
+└── README.md
+⚙️ Workflow (End-to-End)
+1️⃣ User Input (Frontend)
 
-# What Was Done
--Repository created
--Team members added
--Branching strategy defined
--Branch protection rules enabled
--Sprint-1 milestone created
+# STEP 1:- User fills form:
 
-# Branch Strategy
-main → Production branch
-develop → Integration branch
-feature/* → Developer-specific branches
+Cloud provider, region, instance type
+Packages (Docker, Nginx, etc.)
+Deployment preferences (Kubernetes, replicas)
 
-# Rules:
-No direct push to main or develop
-All changes through Pull Requests
-Minimum 1 approval required
+# STEP 2:- API Request
 
-# Initial Folder Structure
-terraform/
-jenkins/
-docker/
-README.md
+Frontend sends:
 
-# Sprint-1 Outcome
-Clean and structured repository
-Proper Git workflow established
-Ready for infrastructure implementation in Sprint-2
+POST /deploy
+
+With JSON payload to FastAPI
+
+# STEP 3:- Backend Processing
+Generates:
+Terraform configuration (main.tf)
+Ansible playbook (setup.yml)
+Stores files temporarily
+
+# STEP 4:- Infrastructure Provisioning
+terraform init
+terraform apply
+
+👉 Creates EC2 instances on AWS
+
+# STEP 5:- Configuration Management
+ansible-playbook setup.yml
+
+👉 Installs packages and configures servers
+
+# STEP 6:- Deployment
+Docker container setup OR
+Kubernetes deployment (if selected)
+
+# STEP 7:-Monitoring & Logs
+Logs streamed to frontend in real-time
+Status shown:
+Pending
+Running
+Success
+Failed
+# Security Best Practices
+❌ No hardcoded credentials
+✅ Use environment variables for AWS access
+✅ IAM role-based access control
+✅ Secure API handling
+✅ Temporary file storage
+
+# Future Enhancements
+Deployment history tracking
+Multi-cloud support (GCP, Azure)
+Kubernetes auto-scaling
+Role-based user authentication
+Advanced monitoring dashboards
