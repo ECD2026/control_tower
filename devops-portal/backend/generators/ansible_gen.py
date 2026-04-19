@@ -67,10 +67,11 @@ def _build_package_tasks(
         append: yes""")
             else:
                 tasks.append("""\
-    - name: Install Docker
-      yum:
-        name: docker
-        state: present
+    - name: Install Docker via amazon-linux-extras
+      shell: amazon-linux-extras install docker -y
+      args:
+        executable: /bin/bash
+        creates: /usr/bin/docker
 
     - name: Start and enable Docker
       service:
@@ -101,9 +102,28 @@ def _build_package_tasks(
       until: k3s_ready.rc == 0""")
 
         elif pkg_lower == "nginx":
-            tasks.append(f"""\
+            if is_ubuntu:
+                tasks.append("""\
     - name: Install Nginx
-      {pkg_mgr}:
+      apt:
+        name: nginx
+        state: present
+
+    - name: Start and enable Nginx
+      service:
+        name: nginx
+        state: started
+        enabled: yes""")
+            else:
+                tasks.append("""\
+    - name: Enable nginx via amazon-linux-extras
+      shell: amazon-linux-extras enable nginx1 -y
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Install Nginx
+      yum:
         name: nginx
         state: present
 
