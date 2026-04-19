@@ -5,6 +5,9 @@ from routes.history import router as history_router
 from routes.instances import router as instances_router
 from database.db import init_db
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = FastAPI(
     title="DevOps Automation Portal API",

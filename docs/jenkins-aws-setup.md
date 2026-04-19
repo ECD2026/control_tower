@@ -17,18 +17,43 @@ agent Jenkins picks must satisfy the following.
 
 ### 1.1 Operating system
 
-- Linux or any Unix that supports `bash`.
-- The pipeline explicitly refuses to run on a Windows Jenkins agent.
+The pipeline auto-detects the agent OS via `isUnix()` and branches:
+
+- **Linux / macOS agent**: stages run directly with `sh`.
+- **Windows agent**: stages run through `wsl -- bash ...`. All Unix tooling
+  (Python 3, Terraform, Ansible, SSH, git) must be installed *inside* WSL, not
+  natively on Windows. Ansible is Linux-only, so WSL is the only supported
+  Windows path.
 
 ### 1.2 Installed tools
+
+On a **Linux agent**, install these on the host.  
+On a **Windows agent**, install them *inside your WSL distribution* (e.g.
+`wsl -d Ubuntu` and then `sudo apt install ...`).
 
 | Tool       | How to verify                  | Notes                                                                                |
 | ---------- | ------------------------------ | ------------------------------------------------------------------------------------ |
 | Python 3.9+ | `python3 --version`           | Used to build a virtualenv in the workspace.                                         |
 | Terraform  | `terraform version`            | Must be on `PATH`. The portal currently targets the `~> 5.0` AWS provider.            |
+| Ansible    | `ansible --version`            | Pipeline also `pip install ansible` into the venv, but having the system package avoids slow first-run installs. |
 | SSH client | `ssh -V`                       | Required both by Ansible and for the SSH readiness probe in `local_executor.py`.      |
 | git        | `git --version`                | Needed for `checkout scm` in the pipeline.                                           |
 | pip        | `python3 -m pip --version`     | Must be able to reach PyPI; the pipeline installs Ansible into a local venv.         |
+
+### 1.2.1 Windows + WSL extras
+
+If your Jenkins is on Windows (e.g. `C:\ProgramData\Jenkins\...`):
+
+1. Install WSL 2 and a Linux distro: `wsl --install -d Ubuntu`.
+2. Inside WSL: `sudo apt update && sudo apt install -y python3 python3-venv python3-pip git openssh-client ansible unzip curl`.
+3. Install Terraform inside WSL (HashiCorp apt repo, or download the linux_amd64 binary).
+4. Verify from a Windows cmd prompt:
+   ```bat
+   wsl -- bash -lc "python3 --version && terraform version && ansible --version && ssh -V"
+   ```
+5. The pipeline uses `WSLENV` to forward env vars (including path-translated
+   `PORTAL_SSH_KEY_FILE` and `SSH_KEY_DIR`) into WSL automatically — no extra
+   configuration needed beyond having WSL installed.
 
 If your agent cannot reach PyPI directly, mirror the following wheels on an
 internal index and point `pip` at it: `fastapi`, `uvicorn`, `python-dotenv`,

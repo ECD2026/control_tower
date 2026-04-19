@@ -179,11 +179,13 @@ async def stream_configuration_logs(configuration_id: str):
 
         while True:
             try:
-                message = await asyncio.wait_for(queue.get(), timeout=120.0)
+                message = await asyncio.wait_for(queue.get(), timeout=15.0)
             except asyncio.TimeoutError:
-                yield "data: [TIMEOUT] No activity for 120 s\n\n"
-                yield "data: __DONE__\n\n"
-                break
+                if configuration_id not in active_queues:
+                    yield "data: __DONE__\n\n"
+                    break
+                yield ": keepalive\n\n"
+                continue
 
             if message == "__DONE__":
                 yield "data: __DONE__\n\n"
