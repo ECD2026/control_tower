@@ -123,7 +123,8 @@ pipeline {
               "KUBERNETES=${params.KUBERNETES}",
               "REPLICAS=${params.REPLICAS}",
               "AWS_DEFAULT_REGION=${params.REGION}",
-              "ANSIBLE_HOST_KEY_CHECKING=False"
+              "ANSIBLE_HOST_KEY_CHECKING=False",
+              "DB_PATH=C:\\Users\\Asus\\Documents\\GitHub\\control_tower\\devops-portal\\backend\\deployments.db"
             ]) {
               script {
                 if (isUnix()) {
