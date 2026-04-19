@@ -13,5 +13,7 @@ Current documents:
   the day-2 per-instance package management feature.
 - `post-phase-2-configuration.md`: additional configuration required on the
   user's end after the Phase 2 code changes.
+- `demo-runbook.md`: step-by-step terminal commands to start all services and
+  walk through the demo end-to-end.
 - `changes.md`: detailed implementation log for repository updates made during
   this work.

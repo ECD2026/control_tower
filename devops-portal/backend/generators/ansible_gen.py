@@ -177,16 +177,21 @@ def _build_system_update_task(is_ubuntu: bool) -> str:
         update_cache: yes
         cache_valid_time: 3600"""
     return """\
-    - name: Wait for yum or dnf locks to clear
+    - name: Wait for cloud-init to finish
+      shell: cloud-init status --wait 2>/dev/null || true
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Wait for yum or dnf processes to exit
       shell: |
-        for i in {1..30}; do
-          if [ ! -f /var/run/yum.pid ] && [ ! -f /var/cache/dnf/metadata_lock.pid ] && [ ! -f /var/lib/rpm/.rpm.lock ]; then
+        for i in {1..60}; do
+          if ! pgrep -x yum > /dev/null 2>&1 && ! pgrep -x dnf > /dev/null 2>&1; then
             exit 0
           fi
-          sleep 10
+          sleep 5
         done
-        echo "Package manager lock did not clear in time"
-        exit 1
+        exit 0
       args:
         executable: /bin/bash
       changed_when: false
