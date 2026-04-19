@@ -24,13 +24,12 @@ pipeline {
   }
 
   environment {
-    TF_IN_AUTOMATION = 'true'
-    PYTHONUNBUFFERED = '1'
+    TF_IN_AUTOMATION  = 'true'
+    PYTHONUNBUFFERED  = '1'
+    PYTHONUTF8        = '1'
+    PYTHONIOENCODING  = 'utf-8'
     AWS_CREDENTIALS_ID = 'aws-portal-credentials'
     SSH_CREDENTIALS_ID = 'portal-ssh-key'
-    // Forward these env vars into WSL when invoked from a Windows agent.
-    // `/p` on path-like vars translates C:\... to /mnt/c/... automatically.
-    WSLENV = 'AWS_ACCESS_KEY_ID:AWS_SECRET_ACCESS_KEY:AWS_DEFAULT_REGION:DEPLOY_MODE:DEPLOYMENT_ID:PROVIDER:REGION:INSTANCE_TYPE:INSTANCE_COUNT:KEY_PAIR_NAME:SECURITY_GROUP_PORTS_JSON:OS_TYPE:PACKAGES_JSON:CUSTOM_COMMANDS:DOCKER_IMAGE:KUBERNETES:REPLICAS:TF_IN_AUTOMATION:PYTHONUNBUFFERED:SSH_KEY_DIR/p:PORTAL_SSH_KEY_FILE/p:WORKSPACE/p'
   }
 
   stages {
@@ -47,12 +46,13 @@ pipeline {
       steps {
         script {
           if (isUnix()) {
-            sh 'python3 --version'
-            sh 'terraform version'
-            sh 'ssh -V || true'
+            sh 'python3 --version && terraform version && ansible --version && ssh -V'
           } else {
-            bat 'wsl --status'
-            bat 'wsl -- bash -lc "python3 --version && terraform version && ansible --version && ssh -V"'
+            // Python and Terraform run natively on Windows
+            bat 'python --version'
+            bat '"C:\\Users\\Asus\\develop\\terraform\\terraform.exe" version'
+            // Ansible and SSH live inside WSL
+            bat 'wsl -- bash -lc "ansible --version && ssh -V"'
           }
         }
       }
@@ -62,7 +62,7 @@ pipeline {
       steps {
         script {
           if (!params.KEY_PAIR_NAME?.trim()) {
-            error('KEY_PAIR_NAME is required — provide the AWS key pair name that matches the SSH private key stored in Jenkins credentials.')
+            error('KEY_PAIR_NAME is required.')
           }
         }
       }
@@ -80,14 +80,13 @@ pipeline {
                 pip install -r requirements.txt ansible
               '''
             } else {
-              writeFile file: '_prepare_venv.sh', text: '''#!/usr/bin/env bash
-set -eu
-python3 -m venv .venv-jenkins
-. .venv-jenkins/bin/activate
-python -m pip install --upgrade pip
-pip install -r requirements.txt ansible
-'''
-              bat 'wsl -- bash ./_prepare_venv.sh'
+              // Run Python natively on Windows — ansible is NOT installed here
+              // because runner.py routes ansible-playbook through wsl on win32.
+              bat '''
+                python -m venv .venv-jenkins
+                .venv-jenkins\\Scripts\\python -m pip install --upgrade pip
+                .venv-jenkins\\Scripts\\pip install -r requirements.txt
+              '''
             }
           }
         }
@@ -124,28 +123,27 @@ pip install -r requirements.txt ansible
               "KUBERNETES=${params.KUBERNETES}",
               "REPLICAS=${params.REPLICAS}",
               "AWS_DEFAULT_REGION=${params.REGION}",
-              "SSH_KEY_DIR=${env.WORKSPACE}/.ssh-portal"
+              "ANSIBLE_HOST_KEY_CHECKING=False"
             ]) {
               script {
                 if (isUnix()) {
                   sh '''
                     set -eu
-                    mkdir -p "$SSH_KEY_DIR"
-                    cp "$PORTAL_SSH_KEY_FILE" "$SSH_KEY_DIR/${KEY_PAIR_NAME}.pem"
-                    chmod 600 "$SSH_KEY_DIR/${KEY_PAIR_NAME}.pem"
+                    mkdir -p "$HOME/.ssh"
+                    cp "$PORTAL_SSH_KEY_FILE" "$HOME/.ssh/${KEY_PAIR_NAME}.pem"
+                    chmod 600 "$HOME/.ssh/${KEY_PAIR_NAME}.pem"
                     . .venv-jenkins/bin/activate
                     python scripts/run_portal_deployment.py
                   '''
                 } else {
-                  writeFile file: '_run_portal.sh', text: '''#!/usr/bin/env bash
-set -eu
-mkdir -p "$SSH_KEY_DIR"
-cp "$PORTAL_SSH_KEY_FILE" "$SSH_KEY_DIR/${KEY_PAIR_NAME}.pem"
-chmod 600 "$SSH_KEY_DIR/${KEY_PAIR_NAME}.pem"
-. .venv-jenkins/bin/activate
-python scripts/run_portal_deployment.py
-'''
-                  bat 'wsl -- bash ./_run_portal.sh'
+                  // Copy the PEM into WSL's ~/.ssh so that runner.py's
+                  // "wsl -- ssh -i /home/<user>/.ssh/<key>.pem" resolves correctly.
+                  // Python runs natively (win32) so runner.py routes
+                  // Terraform → Windows exe, Ansible/SSH → wsl.
+                  bat """
+                    wsl -- bash -lc "mkdir -p ~/.ssh && cp \$(wslpath '${env.PORTAL_SSH_KEY_FILE}') ~/.ssh/${params.KEY_PAIR_NAME}.pem && chmod 600 ~/.ssh/${params.KEY_PAIR_NAME}.pem"
+                    .venv-jenkins\\Scripts\\python scripts\\run_portal_deployment.py
+                  """
                 }
               }
             }
@@ -158,18 +156,16 @@ python scripts/run_portal_deployment.py
   post {
     always {
       dir('devops-portal/backend') {
-        archiveArtifacts artifacts: '**/main.tf, **/setup.yml, **/inventory.ini', allowEmptyArchive: true, onlyIfSuccessful: false
+        archiveArtifacts artifacts: '**/main.tf, **/setup.yml, **/inventory.ini',
+                         allowEmptyArchive: true, onlyIfSuccessful: false
       }
     }
     cleanup {
       script {
         if (isUnix()) {
-          sh 'rm -rf "$WORKSPACE/.ssh-portal" || true'
+          sh 'rm -f "$HOME/.ssh/${KEY_PAIR_NAME}.pem" || true'
         } else {
-          writeFile file: '_cleanup_portal.sh', text: '''#!/usr/bin/env bash
-rm -rf "$WORKSPACE/.ssh-portal" || true
-'''
-          bat 'wsl -- bash ./_cleanup_portal.sh || exit 0'
+          bat "wsl -- bash -lc \"rm -f ~/.ssh/${params.KEY_PAIR_NAME}.pem || true\""
         }
       }
     }
