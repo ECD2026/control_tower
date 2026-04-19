@@ -33,16 +33,25 @@ class DeploymentResponse(BaseModel):
     deployment_id: str
     status: str
     work_dir: str
+    execution_mode: str = "local"
+    external_ref: Optional[str] = None
+    external_url: Optional[str] = None
 
 
 class DeploymentStatusResponse(BaseModel):
     deployment_id: str
     status: str
+    execution_mode: Optional[str] = None
+    external_ref: Optional[str] = None
+    external_url: Optional[str] = None
 
 
 class HistoryItem(BaseModel):
     id: str
     status: str
+    execution_mode: str = "local"
+    external_ref: Optional[str] = None
+    external_url: Optional[str] = None
     provider: str
     region: str
     instance_type: str

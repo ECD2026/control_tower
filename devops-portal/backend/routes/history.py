@@ -19,6 +19,9 @@ async def list_deployments():
             {
                 "id": row["id"],
                 "status": row["status"],
+                "execution_mode": row.get("execution_mode", "local"),
+                "external_ref": row.get("external_ref"),
+                "external_url": row.get("external_url"),
                 "provider": row["provider"],
                 "region": row["region"],
                 "instance_type": row["instance_type"],

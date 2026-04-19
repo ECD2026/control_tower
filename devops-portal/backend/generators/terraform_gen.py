@@ -123,6 +123,11 @@ output "instance_public_ips" {{
   value       = aws_instance.devops_portal_server[*].public_ip
 }}
 
+output "instance_private_ips" {{
+  description = "Private IP addresses of created instances"
+  value       = aws_instance.devops_portal_server[*].private_ip
+}}
+
 output "instance_ids" {{
   description = "Instance IDs"
   value       = aws_instance.devops_portal_server[*].id

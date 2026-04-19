@@ -9,6 +9,7 @@ asyncio.to_thread and stream lines through an asyncio.Queue.
 import asyncio
 import os
 import queue
+import sys
 import shutil
 import subprocess
 import threading
@@ -43,19 +44,26 @@ def _resolve_command(cmd: list[str]) -> list[str]:
     name = cmd[0]
 
     if name == "terraform":
-        exe = TERRAFORM_EXE if os.path.exists(TERRAFORM_EXE) else shutil.which("terraform") or "terraform"
+        exe = (
+            TERRAFORM_EXE
+            if os.path.exists(TERRAFORM_EXE)
+            else shutil.which("terraform") or "terraform"
+        )
         return [exe] + cmd[1:]
 
     if name == "ansible-playbook":
-        # Convert every Windows path argument to a WSL path
-        wsl_args = []
-        for arg in cmd[1:]:
-            # Convert if it looks like a Windows absolute path
-            if len(arg) >= 3 and arg[1] == ":" and arg[2] in ("\\/"):
-                wsl_args.append(_win_to_wsl(arg))
-            else:
-                wsl_args.append(arg)
-        return [WSL_EXE, "--", "ansible-playbook"] + wsl_args
+        if sys.platform == "win32":
+            # Convert every Windows path argument to a WSL path
+            wsl_args = []
+            for arg in cmd[1:]:
+                if len(arg) >= 3 and arg[1] == ":" and arg[2] in ("\\/"):
+                    wsl_args.append(_win_to_wsl(arg))
+                else:
+                    wsl_args.append(arg)
+            return [WSL_EXE, "--", "ansible-playbook"] + wsl_args
+
+        found = shutil.which("ansible-playbook")
+        return [found or "ansible-playbook"] + cmd[1:]
 
     # Generic fallback
     found = shutil.which(name)

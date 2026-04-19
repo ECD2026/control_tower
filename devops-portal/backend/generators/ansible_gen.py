@@ -1,48 +1,25 @@
 """
 Dynamically generates an Ansible playbook based on user input.
+
+Two entry points:
+  generate_ansible(request)                - full bootstrap playbook for a freshly
+                                             provisioned deployment (hosts: servers).
+  generate_ansible_for_host(instance,
+                            packages,
+                            custom_commands) - day-2 playbook that targets a single
+                                             instance by its public IP.
 """
 
+from typing import List, Optional
 
-def generate_ansible(request) -> str:
-    is_ubuntu = request.os_type == "ubuntu"
-    pkg_mgr = "apt" if is_ubuntu else "yum"
-    ssh_user = "ubuntu" if is_ubuntu else "ec2-user"
 
+def _build_package_tasks(
+    packages: list[str],
+    is_ubuntu: bool,
+    pkg_mgr: str,
+) -> list[str]:
     tasks: list[str] = []
-
-    # ── System update ────────────────────────────────────────────────────────
-    if is_ubuntu:
-        tasks.append("""\
-    - name: Update apt cache
-      apt:
-        update_cache: yes
-        cache_valid_time: 3600""")
-    else:
-        tasks.append("""\
-    - name: Wait for yum or dnf locks to clear
-      shell: |
-        for i in {1..30}; do
-          if [ ! -f /var/run/yum.pid ] && [ ! -f /var/cache/dnf/metadata_lock.pid ] && [ ! -f /var/lib/rpm/.rpm.lock ]; then
-            exit 0
-          fi
-          sleep 10
-        done
-        echo "Package manager lock did not clear in time"
-        exit 1
-      args:
-        executable: /bin/bash
-      changed_when: false
-
-    - name: Update yum cache
-      yum:
-        update_cache: yes
-      register: yum_cache_update
-      retries: 5
-      delay: 20
-      until: yum_cache_update is succeeded""")
-
-    # ── Common packages ──────────────────────────────────────────────────────
-    for pkg in request.packages:
+    for pkg in packages:
         pkg_lower = pkg.lower()
 
         if pkg_lower == "docker":
@@ -189,6 +166,65 @@ def generate_ansible(request) -> str:
       {pkg_mgr}:
         name: {pkg_lower}
         state: present""")
+    return tasks
+
+
+def _build_system_update_task(is_ubuntu: bool) -> str:
+    if is_ubuntu:
+        return """\
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600"""
+    return """\
+    - name: Wait for yum or dnf locks to clear
+      shell: |
+        for i in {1..30}; do
+          if [ ! -f /var/run/yum.pid ] && [ ! -f /var/cache/dnf/metadata_lock.pid ] && [ ! -f /var/lib/rpm/.rpm.lock ]; then
+            exit 0
+          fi
+          sleep 10
+        done
+        echo "Package manager lock did not clear in time"
+        exit 1
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Update yum cache
+      yum:
+        update_cache: yes
+      register: yum_cache_update
+      retries: 5
+      delay: 20
+      until: yum_cache_update is succeeded"""
+
+
+def _build_custom_command_tasks(
+    custom_commands: Optional[str],
+    prefix: str = "Custom command",
+) -> list[str]:
+    tasks: list[str] = []
+    if not (custom_commands and custom_commands.strip()):
+        return tasks
+    for idx, cmd in enumerate(custom_commands.strip().splitlines(), start=1):
+        cmd = cmd.strip()
+        if cmd:
+            tasks.append(f"""\
+    - name: "{prefix} {idx}: {cmd[:60]}"
+      shell: {cmd}
+      args:
+        executable: /bin/bash""")
+    return tasks
+
+
+def generate_ansible(request) -> str:
+    is_ubuntu = request.os_type == "ubuntu"
+    pkg_mgr = "apt" if is_ubuntu else "yum"
+    ssh_user = "ubuntu" if is_ubuntu else "ec2-user"
+
+    tasks: List[str] = [_build_system_update_task(is_ubuntu)]
+    tasks.extend(_build_package_tasks(request.packages, is_ubuntu, pkg_mgr))
 
     # ── Docker container deployment ──────────────────────────────────────────
     if request.docker_image and request.docker_image.strip():
@@ -230,16 +266,7 @@ def generate_ansible(request) -> str:
       args:
         executable: /bin/bash""")
 
-    # ── Custom commands ──────────────────────────────────────────────────────
-    if request.custom_commands and request.custom_commands.strip():
-        for idx, cmd in enumerate(request.custom_commands.strip().splitlines(), start=1):
-            cmd = cmd.strip()
-            if cmd:
-                tasks.append(f"""\
-    - name: "Custom command {idx}: {cmd[:60]}"
-      shell: {cmd}
-      args:
-        executable: /bin/bash""")
+    tasks.extend(_build_custom_command_tasks(request.custom_commands))
 
     tasks.append("""\
     - name: Deployment complete
@@ -257,6 +284,55 @@ def generate_ansible(request) -> str:
 
 - name: Configure DevOps Portal Servers
   hosts: servers
+  become: yes
+  gather_facts: yes
+  vars:
+    ansible_user: {ssh_user}
+
+  tasks:
+{tasks_yaml}
+"""
+    return playbook
+
+
+def generate_ansible_for_host(
+    instance: dict,
+    packages: List[str],
+    custom_commands: str = "",
+) -> str:
+    """
+    Build a single-host playbook targeted at a specific EC2 instance. Used for
+    day-2 package additions triggered from the portal's Instances tab.
+
+    `instance` must expose at minimum: public_ip, ssh_user, os_type.
+    """
+    os_type = instance.get("os_type") or "amazon_linux"
+    is_ubuntu = os_type == "ubuntu"
+    pkg_mgr = "apt" if is_ubuntu else "yum"
+    ssh_user = instance.get("ssh_user") or ("ubuntu" if is_ubuntu else "ec2-user")
+
+    tasks: List[str] = [_build_system_update_task(is_ubuntu)]
+    tasks.extend(_build_package_tasks(packages, is_ubuntu, pkg_mgr))
+    tasks.extend(
+        _build_custom_command_tasks(custom_commands, prefix="Post-install command")
+    )
+    tasks.append("""\
+    - name: Configuration complete
+      debug:
+        msg: "Packages applied successfully to {{ inventory_hostname }}!" """)
+
+    tasks_yaml = "\n\n".join(tasks)
+
+    playbook = f"""---
+# ============================================================
+# Generated by DevOps Automation Portal (day-2 instance update)
+# Instance : {instance.get("id", "unknown")}
+# OS Type  : {os_type}
+# Packages : {", ".join(packages) if packages else "none"}
+# ============================================================
+
+- name: Apply package updates to {instance.get("id", "target instance")}
+  hosts: target
   become: yes
   gather_facts: yes
   vars:

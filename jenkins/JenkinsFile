@@ -1,0 +1,136 @@
+pipeline {
+  agent any
+
+  options {
+    disableConcurrentBuilds()
+    timestamps()
+  }
+
+  parameters {
+    choice(name: 'DEPLOY_MODE', choices: ['plan', 'deploy'], description: 'Run plan-only or full deploy')
+    string(name: 'DEPLOYMENT_ID', defaultValue: '', description: 'Portal deployment identifier')
+    string(name: 'PROVIDER', defaultValue: 'aws', description: 'Cloud provider')
+    string(name: 'REGION', defaultValue: 'us-east-1', description: 'AWS region')
+    string(name: 'INSTANCE_TYPE', defaultValue: 't2.micro', description: 'Instance type')
+    string(name: 'INSTANCE_COUNT', defaultValue: '1', description: 'Number of instances')
+    string(name: 'KEY_PAIR_NAME', defaultValue: '', description: 'Existing AWS key pair name')
+    string(name: 'SECURITY_GROUP_PORTS_JSON', defaultValue: '[22, 80, 443]', description: 'JSON array of inbound ports')
+    choice(name: 'OS_TYPE', choices: ['amazon_linux', 'ubuntu'], description: 'Base operating system')
+    string(name: 'PACKAGES_JSON', defaultValue: '[]', description: 'JSON array of packages to install')
+    text(name: 'CUSTOM_COMMANDS', defaultValue: '', description: 'Optional custom shell commands')
+    string(name: 'DOCKER_IMAGE', defaultValue: '', description: 'Optional Docker image to run')
+    booleanParam(name: 'KUBERNETES', defaultValue: false, description: 'Deploy with k3s')
+    string(name: 'REPLICAS', defaultValue: '1', description: 'Replica count when Kubernetes is enabled')
+  }
+
+  environment {
+    TF_IN_AUTOMATION = 'true'
+    PYTHONUNBUFFERED = '1'
+    AWS_CREDENTIALS_ID = 'aws-portal-credentials'
+    SSH_CREDENTIALS_ID = 'portal-ssh-key'
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        checkout scm
+        script {
+          currentBuild.description = "${params.DEPLOY_MODE} ${params.REGION} ${params.INSTANCE_TYPE} x${params.INSTANCE_COUNT}"
+        }
+      }
+    }
+
+    stage('Validate Agent') {
+      steps {
+        script {
+          if (!isUnix()) {
+            error('This Jenkins pipeline currently expects a Linux/Unix agent with Terraform and SSH available.')
+          }
+        }
+        sh 'python3 --version'
+        sh 'terraform version'
+        sh 'ssh -V || true'
+      }
+    }
+
+    stage('Validate Inputs') {
+      steps {
+        script {
+          if (!params.KEY_PAIR_NAME?.trim()) {
+            error('KEY_PAIR_NAME is required — provide the AWS key pair name that matches the SSH private key stored in Jenkins credentials.')
+          }
+        }
+      }
+    }
+
+    stage('Prepare Python Environment') {
+      steps {
+        dir('devops-portal/backend') {
+          sh '''
+            python3 -m venv .venv-jenkins
+            . .venv-jenkins/bin/activate
+            python -m pip install --upgrade pip
+            pip install -r requirements.txt ansible
+          '''
+        }
+      }
+    }
+
+    stage('Run Portal Deployment') {
+      steps {
+        dir('devops-portal/backend') {
+          withCredentials([
+            usernamePassword(
+              credentialsId: "${env.AWS_CREDENTIALS_ID}",
+              usernameVariable: 'AWS_ACCESS_KEY_ID',
+              passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+            ),
+            sshUserPrivateKey(
+              credentialsId: "${env.SSH_CREDENTIALS_ID}",
+              keyFileVariable: 'PORTAL_SSH_KEY_FILE'
+            )
+          ]) {
+            withEnv([
+              "DEPLOY_MODE=${params.DEPLOY_MODE}",
+              "DEPLOYMENT_ID=${params.DEPLOYMENT_ID}",
+              "PROVIDER=${params.PROVIDER}",
+              "REGION=${params.REGION}",
+              "INSTANCE_TYPE=${params.INSTANCE_TYPE}",
+              "INSTANCE_COUNT=${params.INSTANCE_COUNT}",
+              "KEY_PAIR_NAME=${params.KEY_PAIR_NAME}",
+              "SECURITY_GROUP_PORTS_JSON=${params.SECURITY_GROUP_PORTS_JSON}",
+              "OS_TYPE=${params.OS_TYPE}",
+              "PACKAGES_JSON=${params.PACKAGES_JSON}",
+              "CUSTOM_COMMANDS=${params.CUSTOM_COMMANDS}",
+              "DOCKER_IMAGE=${params.DOCKER_IMAGE}",
+              "KUBERNETES=${params.KUBERNETES}",
+              "REPLICAS=${params.REPLICAS}",
+              "AWS_DEFAULT_REGION=${params.REGION}",
+              "SSH_KEY_DIR=${env.WORKSPACE}/.ssh-portal"
+            ]) {
+              sh '''
+                set -eu
+                mkdir -p "$SSH_KEY_DIR"
+                cp "$PORTAL_SSH_KEY_FILE" "$SSH_KEY_DIR/${KEY_PAIR_NAME}.pem"
+                chmod 600 "$SSH_KEY_DIR/${KEY_PAIR_NAME}.pem"
+                . .venv-jenkins/bin/activate
+                python scripts/run_portal_deployment.py
+              '''
+            }
+          }
+        }
+      }
+    }
+  }
+
+  post {
+    always {
+      dir('devops-portal/backend') {
+        archiveArtifacts artifacts: '**/main.tf, **/setup.yml, **/inventory.ini', allowEmptyArchive: true, onlyIfSuccessful: false
+      }
+    }
+    cleanup {
+      sh 'rm -rf "$WORKSPACE/.ssh-portal" || true'
+    }
+  }
+}
