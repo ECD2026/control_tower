@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   RefreshCw, Loader2, ServerCog, Wifi, WifiOff, Rocket, Package, Terminal,
-  CheckCircle2, XCircle,
+  CheckCircle2, XCircle, Play, Square, Trash2, Activity,
 } from 'lucide-react'
 import LogsPanel from './LogsPanel'
 
 const API = ''
+const EMBED_GRAFANA = false
+const DEFAULT_INSTANCE_PACKAGES = ['node_exporter']
 
 const PACKAGE_OPTIONS = [
   { id: 'docker',     label: 'Docker' },
@@ -14,6 +16,8 @@ const PACKAGE_OPTIONS = [
   { id: 'git',        label: 'Git' },
   { id: 'python3',    label: 'Python 3' },
   { id: 'nodejs',     label: 'Node.js' },
+  { id: 'node_exporter', label: 'Node Exporter' },
+  { id: 'cadvisor',      label: 'cAdvisor' },
 ]
 
 const STATE_STYLE = {
@@ -45,11 +49,17 @@ export default function Instances() {
   const [loading, setLoading] = useState(false)
   const [reconciling, setReconciling] = useState(false)
   const [selected, setSelected] = useState(null)  // selected instance object
-  const [packages, setPackages] = useState([])
+  const [packages, setPackages] = useState(DEFAULT_INSTANCE_PACKAGES)
   const [customCommands, setCustomCommands] = useState('')
   const [configStatus, setConfigStatus] = useState('idle')
   const [configLogs, setConfigLogs] = useState([])
+  const [monitoring, setMonitoring] = useState(null)
   const [reconcileSummary, setReconcileSummary] = useState(null)
+  const [instanceAction, setInstanceAction] = useState({
+    status: 'idle',
+    action: null,
+    message: '',
+  })
   const esRef = useRef(null)
 
   const fetchInstances = useCallback(async () => {
@@ -72,10 +82,84 @@ export default function Instances() {
 
   const selectInstance = (inst) => {
     setSelected(inst)
-    setPackages([])
+    setPackages(DEFAULT_INSTANCE_PACKAGES)
     setCustomCommands('')
     setConfigLogs([])
     setConfigStatus('idle')
+    setMonitoring(null)
+    setInstanceAction({ status: 'idle', action: null, message: '' })
+  }
+
+  const openMonitoring = async (inst) => {
+    if (!inst) return
+    try {
+      const res = await fetch(`${API}/api/instances/${inst.id}/monitoring`)
+      if (!res.ok) throw new Error(await res.text())
+      const data = await res.json()
+      if (!data.enabled) {
+        setInstanceAction({
+          status: 'failed',
+          action: 'monitor',
+          message: 'Monitoring is not enabled for this instance.',
+        })
+        return
+      }
+      if (EMBED_GRAFANA) {
+        setMonitoring(data)
+      } else {
+        window.open(data.grafana_url, '_blank', 'noopener')
+      }
+    } catch (err) {
+      setInstanceAction({
+        status: 'failed',
+        action: 'monitor',
+        message: err.message || 'Unable to open monitoring dashboard.',
+      })
+    }
+  }
+
+  const runInstanceAction = async (action) => {
+    if (!selected) return
+
+    if (action === 'delete') {
+      const confirmed = window.confirm(
+        `Delete instance ${selected.id}? This will terminate it in AWS.`
+      )
+      if (!confirmed) return
+    }
+
+    setInstanceAction({ status: 'running', action, message: '' })
+
+    const endpoint = action === 'delete'
+      ? `${API}/api/instances/${selected.id}`
+      : `${API}/api/instances/${selected.id}/${action}`
+    const method = action === 'delete' ? 'DELETE' : 'POST'
+
+    try {
+      const res = await fetch(endpoint, { method })
+      if (!res.ok) throw new Error(await res.text())
+      const payload = await res.json()
+
+      setSelected(prev => (
+        prev && prev.id === selected.id
+          ? { ...prev, state: payload.state || prev.state }
+          : prev
+      ))
+      await fetchInstances()
+
+      const verb = action === 'delete' ? 'deleted' : `${action}ed`
+      setInstanceAction({
+        status: 'success',
+        action,
+        message: `Instance ${selected.id} ${verb} successfully.`,
+      })
+    } catch (err) {
+      setInstanceAction({
+        status: 'failed',
+        action,
+        message: err.message || `Failed to ${action} instance.`,
+      })
+    }
   }
 
   const reconcile = async () => {
@@ -146,6 +230,10 @@ export default function Instances() {
   }
 
   const isBusy = configStatus === 'pending' || configStatus === 'running'
+  const actionBusy = instanceAction.status === 'running'
+  const canStart = selected?.state === 'stopped'
+  const canStop = selected?.state === 'running'
+  const canDelete = selected?.state !== 'terminated'
 
   return (
     <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
@@ -284,6 +372,61 @@ export default function Instances() {
             </div>
 
             <div>
+              <label className="label">Instance actions</label>
+              <div className="grid grid-cols-4 gap-2">
+                <button
+                  type="button"
+                  onClick={() => runInstanceAction('start')}
+                  disabled={isBusy || actionBusy || !canStart}
+                  className="btn-success justify-center py-2"
+                >
+                  {actionBusy && instanceAction.action === 'start'
+                    ? <Loader2 size={14} className="animate-spin" />
+                    : <Play size={14} />}
+                  Start
+                </button>
+                <button
+                  type="button"
+                  onClick={() => runInstanceAction('stop')}
+                  disabled={isBusy || actionBusy || !canStop}
+                  className="btn-ghost justify-center py-2"
+                >
+                  {actionBusy && instanceAction.action === 'stop'
+                    ? <Loader2 size={14} className="animate-spin" />
+                    : <Square size={14} />}
+                  Stop
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openMonitoring(selected)}
+                  disabled={isBusy || actionBusy || selected.state !== 'running'}
+                  className="btn-ghost justify-center py-2"
+                  title="Open Grafana dashboard for this instance"
+                >
+                  <Activity size={14} />
+                  Monitor
+                </button>
+                <button
+                  type="button"
+                  onClick={() => runInstanceAction('delete')}
+                  disabled={isBusy || actionBusy || !canDelete}
+                  className="flex items-center justify-center gap-2 px-5 py-2 text-white font-semibold text-sm rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-red-600 hover:bg-red-500 active:bg-red-700"
+                >
+                  {actionBusy && instanceAction.action === 'delete'
+                    ? <Loader2 size={14} className="animate-spin" />
+                    : <Trash2 size={14} />}
+                  Delete
+                </button>
+              </div>
+              {instanceAction.status === 'failed' && (
+                <p className="text-xs text-red-400 mt-2">{instanceAction.message}</p>
+              )}
+              {instanceAction.status === 'success' && (
+                <p className="text-xs text-emerald-400 mt-2">{instanceAction.message}</p>
+              )}
+            </div>
+
+            <div>
               <label className="label">Packages to install</label>
               <div className="grid grid-cols-3 gap-2">
                 {PACKAGE_OPTIONS.map(pkg => {
@@ -353,6 +496,26 @@ export default function Instances() {
               )}
             </h3>
             <LogsPanel logs={configLogs} status={configStatus} />
+          </div>
+        )}
+
+        {EMBED_GRAFANA && monitoring?.grafana_url && (
+          <div className="card p-0 overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
+              <h3 className="text-sm font-semibold text-gray-300">Monitoring</h3>
+              <button
+                type="button"
+                onClick={() => setMonitoring(null)}
+                className="btn-ghost text-xs py-1 px-3"
+              >
+                Close
+              </button>
+            </div>
+            <iframe
+              title="Grafana Monitoring"
+              src={`${monitoring.grafana_url}&kiosk=tv&theme=dark`}
+              className="w-full h-[420px]"
+            />
           </div>
         )}
       </div>

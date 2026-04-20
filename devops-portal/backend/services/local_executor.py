@@ -9,6 +9,7 @@ from executor.runner import execute_command
 from generators.ansible_gen import generate_ansible
 from generators.terraform_gen import generate_terraform
 from models.schemas import DeploymentRequest
+from services.prometheus_targets import rewrite_targets
 
 from services.execution_types import ExecutionResult, LogFn
 
@@ -190,8 +191,16 @@ async def run_local_deployment(
     ssh_key_path = f"{DEFAULT_SSH_KEY_DIR}/{request.key_pair_name}.pem"
 
     if deployment_id and instance_ids:
+        monitoring_enabled = "node_exporter" in [pkg.lower() for pkg in request.packages]
         persisted: List[dict] = []
         for index, tf_id in enumerate(instance_ids):
+            tags = {
+                "Name": f"devops-portal-server-{index + 1}",
+                "Environment": "devops-portal",
+                "ManagedBy": "DevOpsAutomationPortal",
+            }
+            if monitoring_enabled:
+                tags["monitoring"] = "enabled"
             persisted.append(
                 {
                     "id": tf_id,
@@ -205,15 +214,12 @@ async def run_local_deployment(
                     "region": request.region,
                     "instance_type": request.instance_type,
                     "state": "running",
-                    "tags": {
-                        "Name": f"devops-portal-server-{index + 1}",
-                        "Environment": "devops-portal",
-                        "ManagedBy": "DevOpsAutomationPortal",
-                    },
+                    "tags": tags,
                 }
             )
         try:
             save_instances(deployment_id, persisted)
+            rewrite_targets()
             await log(
                 f"[{_ts()}] Persisted {len(persisted)} instance record(s) "
                 f"to local inventory"

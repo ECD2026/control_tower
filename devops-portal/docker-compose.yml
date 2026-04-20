@@ -22,9 +22,14 @@ services:
       - JENKINS_POLL_INTERVAL_SECONDS=${JENKINS_POLL_INTERVAL_SECONDS:-3}
       - JENKINS_REQUEST_TIMEOUT_SECONDS=${JENKINS_REQUEST_TIMEOUT_SECONDS:-15}
       - SSH_KEY_DIR=${SSH_KEY_DIR:-/root/.ssh}
+      - GRAFANA_PUBLIC_URL=${GRAFANA_PUBLIC_URL:-http://localhost:3000}
+      - GRAFANA_DASHBOARD_UID=${GRAFANA_DASHBOARD_UID:-instance-overview}
+      - PROMETHEUS_TARGETS_PATH=${PROMETHEUS_TARGETS_PATH:-/app/monitoring/prometheus/targets/instances.json}
+      - PORTAL_MONITORING_SG_ID=${PORTAL_MONITORING_SG_ID:-}
     volumes:
       - backend_data:/data
       - ~/.ssh:/root/.ssh:ro   # for Ansible SSH key access (read-only)
+      - ./monitoring:/app/monitoring
     restart: unless-stopped
 
   frontend:
@@ -37,5 +42,36 @@ services:
       - backend
     restart: unless-stopped
 
+  prometheus:
+    image: prom/prometheus:latest
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    volumes:
+      - ./monitoring/prometheus:/etc/prometheus
+      - prom_data:/prometheus
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+      - GF_SECURITY_ALLOW_EMBEDDING=true
+      - GF_SECURITY_COOKIE_SAMESITE=none
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards
+      - graf_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
 volumes:
   backend_data:
+  prom_data:
+  graf_data:

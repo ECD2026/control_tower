@@ -279,6 +279,15 @@ def update_instance_state(instance_id: str, state: str) -> None:
         )
 
 
+def update_instance_tags(instance_id: str, tags: dict) -> None:
+    now = _now()
+    with _conn() as con:
+        con.execute(
+            "UPDATE instances SET tags=?, updated_at=?, last_seen_at=? WHERE id=?",
+            (json.dumps(tags), now, now, instance_id),
+        )
+
+
 def mark_instance_missing(instance_id: str) -> None:
     """
     Flag an instance as terminated because AWS no longer reports it.

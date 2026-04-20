@@ -13,8 +13,10 @@ import tempfile
 from datetime import datetime, timezone
 from typing import List
 
+from database.db import get_instance, update_instance_tags
 from executor.runner import execute_command
 from generators.ansible_gen import generate_ansible_for_host
+from services.prometheus_targets import rewrite_targets
 
 from services.execution_types import LogFn
 
@@ -164,5 +166,16 @@ async def configure_instance(
         work_dir,
     ):
         await log(f"[ANSIBLE] {line}")
+
+    if "node_exporter" in [pkg.lower() for pkg in packages]:
+        current = get_instance(instance_id) or {}
+        current_tags = current.get("tags") or instance.get("tags") or {}
+        if not isinstance(current_tags, dict):
+            import json
+            current_tags = json.loads(current_tags or "{}")
+        current_tags["monitoring"] = "enabled"
+        update_instance_tags(instance_id, current_tags)
+        rewrite_targets()
+        await log(f"[{_ts()}] Monitoring enabled for {instance_id}")
 
     await log(f"[{_ts()}] Configuration completed successfully on {instance_id}")

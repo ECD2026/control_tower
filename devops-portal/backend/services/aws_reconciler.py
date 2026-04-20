@@ -21,6 +21,7 @@ from database.db import (
     mark_instance_missing,
     save_instance,
 )
+from services.prometheus_targets import rewrite_targets
 
 
 EC2_STATE_MAP = {
@@ -172,6 +173,8 @@ async def reconcile_instances(
             refreshed = dict(inst)
             refreshed["state"] = latest
             save_instance(refreshed)
+
+    rewrite_targets()
 
     return {
         "checked": len(instances),

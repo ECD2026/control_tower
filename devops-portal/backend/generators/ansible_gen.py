@@ -180,6 +180,68 @@ def _build_package_tasks(
       args:
         executable: /bin/bash""")
 
+        elif pkg_lower == "node_exporter":
+            tasks.append("""\
+    - name: Install node_exporter
+      shell: |
+        set -e
+        if ! id -u node_exporter >/dev/null 2>&1; then
+          useradd --system --no-create-home --shell /usr/sbin/nologin node_exporter
+        fi
+        curl -fsSL https://github.com/prometheus/node_exporter/releases/download/v1.8.1/node_exporter-1.8.1.linux-amd64.tar.gz -o /tmp/node_exporter.tar.gz
+        tar -xzf /tmp/node_exporter.tar.gz -C /tmp
+        install -m 0755 /tmp/node_exporter-1.8.1.linux-amd64/node_exporter /usr/local/bin/node_exporter
+      args:
+        executable: /bin/bash
+
+    - name: Configure node_exporter systemd unit
+      copy:
+        dest: /etc/systemd/system/node_exporter.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Prometheus Node Exporter
+          After=network.target
+
+          [Service]
+          User=node_exporter
+          Group=node_exporter
+          Type=simple
+          ExecStart=/usr/local/bin/node_exporter
+          Restart=always
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Enable and start node_exporter
+      systemd:
+        name: node_exporter
+        daemon_reload: yes
+        state: started
+        enabled: yes""")
+
+        elif pkg_lower == "cadvisor":
+            tasks.append("""\
+    - name: Run cAdvisor when Docker is available
+      shell: |
+        set -e
+        if ! command -v docker >/dev/null 2>&1; then
+          echo "Docker is not installed; skipping cAdvisor setup."
+          exit 0
+        fi
+        docker rm -f cadvisor >/dev/null 2>&1 || true
+        docker run -d \
+          --name=cadvisor \
+          --restart=unless-stopped \
+          -p 8080:8080 \
+          -v /:/rootfs:ro \
+          -v /var/run:/var/run:ro \
+          -v /sys:/sys:ro \
+          -v /var/lib/docker/:/var/lib/docker:ro \
+          gcr.io/cadvisor/cadvisor:latest
+      args:
+        executable: /bin/bash""")
+
         else:
             tasks.append(f"""\
     - name: Install {pkg}

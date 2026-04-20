@@ -22,6 +22,8 @@ const PACKAGE_OPTIONS = [
   { id: 'git', label: 'Git', icon: '📦' },
   { id: 'python3', label: 'Python 3', icon: '🐍' },
   { id: 'nodejs', label: 'Node.js', icon: '⬡' },
+  { id: 'node_exporter', label: 'Node Exporter', icon: '📈' },
+  { id: 'cadvisor', label: 'cAdvisor', icon: '📊' },
 ]
 
 function SectionHeader({ icon: Icon, title, color = 'text-blue-400' }) {

@@ -2,6 +2,8 @@
 Dynamically generates Terraform HCL configuration based on user input.
 """
 
+import os
+
 # Latest AMI IDs by region (update periodically)
 AMI_MAP = {
     "amazon_linux": {
@@ -43,6 +45,10 @@ def generate_terraform(request) -> str:
     if 22 not in ports:
         ports.insert(0, 22)  # Always allow SSH
 
+    monitoring_ports = {8080, 9100}
+    ports = [p for p in ports if p not in monitoring_ports]
+    monitoring_sg_id = os.getenv("PORTAL_MONITORING_SG_ID", "").strip()
+
     ingress_blocks = ""
     for port in ports:
         ingress_blocks += f"""
@@ -52,6 +58,18 @@ def generate_terraform(request) -> str:
     to_port     = {port}
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
+  }}"""
+
+    monitoring_ingress_blocks = ""
+    if monitoring_sg_id:
+        for port in sorted(monitoring_ports):
+            monitoring_ingress_blocks += f"""
+  ingress {{
+    description     = "Monitoring port {port} from Prometheus SG"
+    from_port       = {port}
+    to_port         = {port}
+    protocol        = "tcp"
+    security_groups = [var.monitoring_sg_id]
   }}"""
 
     tf = f"""# ============================================================
@@ -75,12 +93,19 @@ provider "aws" {{
   # Credentials are read from AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY env vars
 }}
 
+variable "monitoring_sg_id" {{
+  description = "Security group ID allowed to scrape monitoring exporters"
+  type        = string
+  default     = "{monitoring_sg_id}"
+}}
+
 # ---------- Security Group ----------
 resource "aws_security_group" "devops_portal_sg" {{
   # Use a prefix so repeated deployments do not fail on duplicate SG names.
   name_prefix = "devops-portal-sg-"
   description = "Managed by DevOps Automation Portal"
 {ingress_blocks}
+{monitoring_ingress_blocks}
 
   egress {{
     from_port   = 0

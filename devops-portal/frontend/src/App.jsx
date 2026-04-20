@@ -19,7 +19,7 @@ const DEFAULT_FORM = {
   key_pair_name: '',
   security_group_ports: [22, 80, 443],
   os_type: 'amazon_linux',
-  packages: [],
+  packages: ['node_exporter'],
   custom_commands: '',
   docker_image: '',
   kubernetes: false,
