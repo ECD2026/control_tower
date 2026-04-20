@@ -172,7 +172,12 @@ async def configure_instance(
         current_tags = current.get("tags") or instance.get("tags") or {}
         if not isinstance(current_tags, dict):
             import json
-            current_tags = json.loads(current_tags or "{}")
+            try:
+                current_tags = json.loads(current_tags or "{}")
+            except (TypeError, ValueError):
+                current_tags = {}
+        if not isinstance(current_tags, dict):
+            current_tags = {}
         current_tags["monitoring"] = "enabled"
         update_instance_tags(instance_id, current_tags)
         rewrite_targets()

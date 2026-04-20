@@ -24,6 +24,12 @@ This connects your user account (which has WSL access) to Jenkins.
 Must be running before you trigger any Jenkins build.
 
 ```powershell
+
+wsl cp /mnt/c/Users/Asus/.ssh/automatic.pem /home/asus/.ssh/automatic.pem
+wsl chmod 600 /home/asus/.ssh/automatic.pem
+wsl chown asus:asus /home/asus/.ssh/automatic.pem
+wsl ls -l /home/asus/.ssh/automatic.pem
+
 cd C:\Users\Asus
 java -jar agent.jar `
   -url http://localhost:8080/ `
@@ -31,6 +37,10 @@ java -jar agent.jar `
   -name "wsl-agent" `
   -webSocket `
   -workDir "C:\ProgramData\Jenkins\agent"
+
+cd devops-portal
+docker-compose up -d prometheus grafana
+
 ```
 
 **Expected output:**
@@ -49,9 +59,11 @@ Leave this terminal open. If it disconnects, re-run the same command.
 ## Terminal 2 — Backend
 
 ```powershell
+
 cd C:\Users\Asus\Documents\GitHub\control_tower\devops-portal\backend
 pip install -r requirements.txt   # skip if already done
 uvicorn main:app --reload --port 8000
+
 ```
 
 **Expected output:**
@@ -71,9 +83,11 @@ curl.exe http://localhost:8000/health
 ## Terminal 3 — Frontend
 
 ```powershell
+
 cd C:\Users\Asus\Documents\GitHub\control_tower\devops-portal\frontend
 npm install    # skip if node_modules already exists
 npm run dev
+
 ```
 
 **Expected output:**

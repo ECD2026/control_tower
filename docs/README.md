@@ -17,3 +17,9 @@ Current documents:
   walk through the demo end-to-end.
 - `changes.md`: detailed implementation log for repository updates made during
   this work.
+- `prometheus-grafana-monitoring.md`: plan for adding Prometheus + Grafana
+  monitoring with a per-instance "Monitor" action wired into the Instances
+  tab.
+- `monitoring-setup-config.md`: **step-by-step configuration guide** for setting
+  up Prometheus + Grafana monitoring, including AWS security group creation,
+  environment variables, Terraform integration, and troubleshooting.

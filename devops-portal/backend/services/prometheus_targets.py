@@ -29,6 +29,8 @@ def _monitoring_enabled(raw_tags: str | dict | None) -> bool:
             tags = json.loads(raw_tags or "{}")
         except (TypeError, ValueError):
             tags = {}
+    if not isinstance(tags, dict):
+        return False
     return str(tags.get("monitoring", "")).lower() == "enabled"
 
 

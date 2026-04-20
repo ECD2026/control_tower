@@ -45,7 +45,14 @@ class InstanceConfigurationRequest(BaseModel):
     custom_commands: str = ""
 
 
-def _monitoring_enabled(tags: dict) -> bool:
+def _monitoring_enabled(tags) -> bool:
+    if isinstance(tags, str):
+        try:
+            tags = json.loads(tags or "{}")
+        except (TypeError, ValueError):
+            return False
+    if not isinstance(tags, dict):
+        return False
     return str(tags.get("monitoring", "")).lower() == "enabled"
 
 
