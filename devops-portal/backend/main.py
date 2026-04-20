@@ -2,8 +2,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from routes.deploy import router as deploy_router
 from routes.history import router as history_router
+from routes.instances import router as instances_router
 from database.db import init_db
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = FastAPI(
     title="DevOps Automation Portal API",
@@ -32,6 +36,7 @@ async def startup():
 
 app.include_router(deploy_router, prefix="/api", tags=["deployment"])
 app.include_router(history_router, prefix="/api", tags=["history"])
+app.include_router(instances_router, prefix="/api", tags=["instances"])
 
 
 @app.get("/health")

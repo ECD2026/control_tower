@@ -1,278 +1,205 @@
-# 🚀 AWS Account Automation Platform
+# AWS DevOps Automation Portal
 
-## 📌 Overview
-
-This project implements an **end-to-end DevOps automation platform** for provisioning and managing AWS infrastructure using **Terraform, Jenkins, Docker, and IAM**.
-
-The system simulates a **real-world enterprise environment** where multiple developers collaborate using Git, while infrastructure is provisioned securely and consistently through CI/CD pipelines.
+A full-stack web application for provisioning and managing AWS EC2 infrastructure through a browser UI. Users fill out a form, click Deploy, and watch Terraform and Ansible run live — no CLI required.
 
 ---
 
-## 🎯 Objectives
+## What it does
 
-* Automate AWS infrastructure provisioning using **Infrastructure as Code (IaC)**
-* Enable **multi-developer collaboration** with Git branching strategies
-* Implement **secure IAM role-based access control**
-* Build a **CI/CD pipeline using Jenkins (Dockerized)**
-* Ensure **scalable, reproducible, and version-controlled infrastructure**
+**Phase 1 — Provision infrastructure**
+
+- User opens the portal, fills in region, instance type, OS, packages, and key pair name.
+- Backend generates Terraform HCL and an Ansible playbook on the fly.
+- Terraform provisions EC2 instances, security groups, and outputs public IPs.
+- Ansible SSHes into each instance and installs the selected packages (Docker, Nginx, Git, Python3, Node.js, k3s).
+- Every log line streams live to the browser via Server-Sent Events.
+- Deployment history is stored in SQLite and viewable in the History tab.
+
+**Phase 2 — Day-2 instance management**
+
+- Every provisioned instance is tracked in a local inventory (SQLite).
+- The Instances tab lists all tracked instances with their state, IP, and region.
+- Users can select a running instance, pick additional packages, and apply them without re-running Terraform.
+- Configuration jobs stream live logs the same way deployments do.
+- A Reconcile button syncs instance states with AWS (via boto3 `describe_instances`).
+
+**Jenkins integration**
+
+- The portal can run deployments locally (default) or delegate to a Jenkins pipeline (`DEPLOYMENT_RUNNER_MODE=jenkins`).
+- In Jenkins mode, the portal triggers a parameterized build, streams the Jenkins console output live, and shows a direct link to the build.
+- The Jenkins pipeline supports both Linux agents and Windows agents (via WSL).
 
 ---
 
-## 🏗️ Architecture Overview
+## Architecture
 
 ```
-Developer → GitHub → Jenkins (Docker)
-          → Terraform → AWS
-          → S3 (State Storage)
-          → DynamoDB (State Locking)
+Browser (React + Vite)
+    │
+    │  JSON + Server-Sent Events
+    ▼
+FastAPI backend (Python)
+    ├── POST /api/deploy          — trigger a deployment
+    ├── GET  /api/deploy/{id}/stream  — live log stream (SSE)
+    ├── GET  /api/history         — past deployments
+    ├── GET  /api/instances       — tracked EC2 instances
+    ├── POST /api/instances/{id}/configure  — day-2 Ansible run
+    └── POST /api/instances/reconcile       — sync state with AWS
+         │
+         ├── local mode: Terraform (Windows .exe or Linux binary)
+         │               Ansible  (Linux/WSL)
+         │
+         └── jenkins mode: Jenkins REST API → parameterized pipeline
+                           Jenkins console streamed back to browser
 ```
 
 ---
 
-## 🧰 Tech Stack
+## Tech stack
 
-| Category         | Technology       |
-| ---------------- | ---------------- |
-| Version Control  | GitHub           |
-| CI/CD            | Jenkins (Docker) |
-| Infrastructure   | Terraform        |
-| Cloud Provider   | AWS              |
-| Containerization | Docker           |
-| State Management | S3 + DynamoDB    |
-| Authentication   | IAM Roles        |
+| Layer | Technology |
+|---|---|
+| Frontend | React 18, Vite, Tailwind CSS, lucide-react |
+| Backend | Python 3.12, FastAPI, uvicorn, SQLite |
+| Infrastructure | Terraform (AWS provider ~> 5.0) |
+| Configuration | Ansible |
+| CI/CD | Jenkins (declarative pipeline) |
+| Cloud | AWS EC2, Security Groups, Key Pairs |
+| AWS SDK | boto3 (instance state reconciliation) |
 
 ---
 
-## 📁 Project Structure
+## Project structure
 
 ```
-project-root/
-│
-├── terraform/
-│   ├── modules/
-│   │   ├── network/
-│   │   ├── ec2/
-│   │   ├── iam/
-│   │
-│   ├── environments/
-│   │   ├── dev/
-│   │   ├── test/
-│   │   ├── prod/
-│
+control_tower/
+├── devops-portal/
+│   ├── backend/
+│   │   ├── main.py                        FastAPI entry point
+│   │   ├── .env.example                   Environment variable template
+│   │   ├── requirements.txt
+│   │   ├── database/db.py                 SQLite schema + CRUD helpers
+│   │   ├── generators/
+│   │   │   ├── terraform_gen.py           Dynamic HCL generation
+│   │   │   └── ansible_gen.py             Dynamic playbook generation
+│   │   ├── executor/runner.py             Async subprocess runner (Windows+WSL aware)
+│   │   ├── routes/
+│   │   │   ├── deploy.py                  Deployment endpoints + SSE stream
+│   │   │   ├── history.py                 History endpoints
+│   │   │   └── instances.py              Instance management endpoints
+│   │   ├── services/
+│   │   │   ├── local_executor.py          Terraform + Ansible runner
+│   │   │   ├── jenkins_executor.py        Jenkins API client + log streamer
+│   │   │   ├── deployment_execution.py    Mode dispatcher (local vs jenkins)
+│   │   │   ├── instance_configurator.py   Day-2 single-host Ansible runner
+│   │   │   └── aws_reconciler.py          boto3 EC2 state sync
+│   │   ├── models/schemas.py              Pydantic request/response models
+│   │   └── scripts/run_portal_deployment.py  Jenkins agent entry point
+│   ├── frontend/
+│   │   └── src/
+│   │       ├── App.jsx                    Main layout, nav, SSE wiring
+│   │       └── components/
+│   │           ├── InfraForm.jsx          Deployment form
+│   │           ├── LogsPanel.jsx          Live terminal output
+│   │           ├── DeploymentHistory.jsx  History table
+│   │           ├── Instances.jsx          Instance management tab
+│   │           └── StatusBadge.jsx        Status indicator
+│   └── docker-compose.yml
 ├── jenkins/
-│   └── Jenkinsfile
-│
-├── docker/
-│   └── Dockerfile
-│
+│   └── JenkinsFile                        Declarative pipeline (Linux + Windows/WSL)
+├── terraform/                             Org-level Terraform (Control Tower)
+├── docs/
+│   ├── demo-runbook.md                    Step-by-step commands to run the demo
+│   ├── jenkins-aws-setup.md               Jenkins + AWS one-time configuration
+│   ├── phase-2-instance-management.md     Architecture notes for Phase 2
+│   ├── post-phase-2-configuration.md      Post-deploy configuration checklist
+│   └── changes.md                         Detailed implementation log
 └── README.md
 ```
 
 ---
 
-## 🌿 Git Branching Strategy
+## Running locally
 
-### Branches
+See [docs/demo-runbook.md](docs/demo-runbook.md) for the exact terminal commands.
 
-* `main` → Production-ready code (default branch)
-* `feature-1` → Developer 1
-* `feature-2` → Developer 2
-* `feature-3` → Developer 3
+**Three terminals:**
 
-### Workflow
+```powershell
+# Terminal 1 — Jenkins WSL agent (required for Jenkins mode)
+java -jar agent.jar -url http://localhost:8080/ -secret <secret> -name "wsl-agent" -webSocket -workDir "C:\ProgramData\Jenkins\agent"
 
-1. Each developer works on their own feature branch
-2. Regularly sync with `main`
-3. Create Pull Request → `main`
-4. Merge after review
+# Terminal 2 — Backend
+cd devops-portal/backend
+uvicorn main:app --reload --port 8000
 
----
+# Terminal 3 — Frontend
+cd devops-portal/frontend
+npm run dev
+```
 
-## 🔐 AWS Setup
-
-### IAM Components
-
-* **IAM User:** `platform-admin`
-
-  * Used for initial setup only
-* **IAM Role:** `githubterraform`
-
-  * Used by Terraform/Jenkins to provision infrastructure
+Open **http://localhost:5173**.
 
 ---
 
-### Terraform Backend
+## Configuration
 
-#### S3 Bucket
+Copy `devops-portal/backend/.env.example` to `.env` and fill in:
 
-* Stores Terraform state
-* Versioning enabled
+```env
+AWS_ACCESS_KEY_ID=...
+AWS_SECRET_ACCESS_KEY=...
+AWS_DEFAULT_REGION=ap-south-1
 
-#### DynamoDB Table
+# For Jenkins mode:
+DEPLOYMENT_RUNNER_MODE=jenkins
+JENKINS_BASE_URL=http://localhost:8080
+JENKINS_JOB_NAME=devops-portal-deploy
+JENKINS_USER=<your Jenkins username>
+JENKINS_API_TOKEN=<token from Jenkins → Configure → API Token>
+```
 
-* Handles state locking
-* Prevents concurrent modifications
+Leave `DEPLOYMENT_RUNNER_MODE=local` to run Terraform and Ansible directly from the backend process instead.
 
 ---
 
-## ⚙️ Setup Instructions
+## Jenkins setup
+
+See [docs/jenkins-aws-setup.md](docs/jenkins-aws-setup.md) for the full walkthrough.
+
+Key steps:
+1. Create a Jenkins pipeline job pointed at `jenkins/JenkinsFile` in this repo.
+2. Add an `aws-portal-credentials` Jenkins credential (Username + Password = Access Key ID + Secret).
+3. Add a `portal-ssh-key` Jenkins SSH credential (your EC2 key pair PEM).
+4. On Windows: connect a WSL-enabled agent node so the pipeline can run Ansible.
 
 ---
 
-### 1️⃣ Clone Repository
+## AWS permissions required
 
-```bash
-git clone https://github.com/your-repo.git
-cd your-repo
+The IAM identity used by Terraform and boto3 needs at minimum:
+
+```
+ec2:RunInstances, ec2:TerminateInstances, ec2:DescribeInstances,
+ec2:DescribeInstanceStatus, ec2:CreateSecurityGroup, ec2:AuthorizeSecurityGroupIngress,
+ec2:CreateKeyPair, ec2:DeleteKeyPair, ec2:DescribeKeyPairs,
+ec2:DescribeSecurityGroups, ec2:DeleteSecurityGroup
 ```
 
 ---
 
-### 2️⃣ Configure AWS CLI
+## Git workflow
 
-```bash
-aws configure
-```
+| Branch | Purpose |
+|--------|---------|
+| `main` | Production — merges only via PR |
+| `develop` | Integration branch |
+| `feature-*` | Individual feature branches |
 
-Enter:
-
-* Access Key
-* Secret Key
-* Region (e.g., ap-south-1)
+No direct pushes to `main`. All changes go through a pull request with at least one approval.
 
 ---
 
-### 3️⃣ Initialize Terraform
+## License
 
-```bash
-terraform init
-```
-
----
-
-### 4️⃣ Validate Terraform
-
-```bash
-terraform validate
-```
-
----
-
-### 5️⃣ Plan Infrastructure
-
-```bash
-terraform plan
-```
-
----
-
-### 6️⃣ Apply Infrastructure
-
-```bash
-terraform apply
-```
-
----
-
-## 🐳 Jenkins Setup (Docker)
-
-### Build Jenkins Image
-
-```bash
-docker build -t jenkins-terraform .
-```
-
----
-
-### Run Jenkins Container
-
-```bash
-docker run -p 8080:8080 jenkins-terraform
-```
-
----
-
-### Jenkins Configuration
-
-Install plugins:
-
-* Git Plugin
-* Pipeline Plugin
-* AWS Credentials Plugin
-* Terraform Plugin
-
----
-
-## 🔄 CI/CD Pipeline
-
-### Pipeline Stages
-
-1. Checkout Code
-2. Terraform Init
-3. Terraform Validate
-4. Terraform Plan
-5. (Future) Terraform Apply
-
----
-
-## 🔒 Security Best Practices
-
-* ❌ No hardcoded credentials
-* ✅ Use IAM roles instead of users
-* ✅ Enable S3 encryption
-* ✅ Use least privilege policies
-* ✅ Protect `main` branch with PR rules
-
----
-
-## 📊 Features Implemented
-
-* Modular Terraform architecture
-* Remote backend with locking
-* Multi-developer Git workflow
-* Dockerized Jenkins setup
-* Secure IAM-based access
-
----
-
-## 🚧 Future Enhancements
-
-* GitHub Actions integration
-* Kubernetes-based Jenkins scaling
-* Monitoring with CloudWatch / Prometheus
-* Multi-region disaster recovery
-* Automated approval workflows
-
----
-
-## 🧠 Key Learnings
-
-* Infrastructure as Code (IaC)
-* CI/CD pipeline design
-* Git collaboration workflows
-* AWS IAM security practices
-* Terraform state management
-
----
-
-## 👨‍💻 Contributors
-
-* Developer 1 → Feature 1
-* Developer 2 → Feature 2
-* Developer 3 → Feature 3
-
----
-
-## 📜 License
-
-This project is for educational and demonstration purposes.
-
----
-
-## ⭐ Final Note
-
-This project demonstrates a **production-style DevOps pipeline** with real-world tools and practices. It is designed to simulate enterprise-level infrastructure automation and team collaboration.
-
----
-
-🚀 *Built for learning, designed like production.*
+For educational and demonstration purposes.

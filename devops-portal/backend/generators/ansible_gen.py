@@ -1,32 +1,25 @@
 """
 Dynamically generates an Ansible playbook based on user input.
+
+Two entry points:
+  generate_ansible(request)                - full bootstrap playbook for a freshly
+                                             provisioned deployment (hosts: servers).
+  generate_ansible_for_host(instance,
+                            packages,
+                            custom_commands) - day-2 playbook that targets a single
+                                             instance by its public IP.
 """
 
+from typing import List, Optional
 
-def generate_ansible(request) -> str:
-    is_ubuntu = request.os_type == "ubuntu"
-    pkg_mgr = "apt" if is_ubuntu else "yum"
-    ssh_user = "ubuntu" if is_ubuntu else "ec2-user"
 
+def _build_package_tasks(
+    packages: list[str],
+    is_ubuntu: bool,
+    pkg_mgr: str,
+) -> list[str]:
     tasks: list[str] = []
-
-    # ── System update ────────────────────────────────────────────────────────
-    if is_ubuntu:
-        tasks.append("""\
-    - name: Update apt cache
-      apt:
-        update_cache: yes
-        cache_valid_time: 3600""")
-    else:
-        tasks.append("""\
-    - name: Update yum cache
-      yum:
-        name: "*"
-        state: latest
-        update_cache: yes""")
-
-    # ── Common packages ──────────────────────────────────────────────────────
-    for pkg in request.packages:
+    for pkg in packages:
         pkg_lower = pkg.lower()
 
         if pkg_lower == "docker":
@@ -74,10 +67,11 @@ def generate_ansible(request) -> str:
         append: yes""")
             else:
                 tasks.append("""\
-    - name: Install Docker
-      yum:
-        name: docker
-        state: present
+    - name: Install Docker via amazon-linux-extras
+      shell: amazon-linux-extras install docker -y
+      args:
+        executable: /bin/bash
+        creates: /usr/bin/docker
 
     - name: Start and enable Docker
       service:
@@ -108,9 +102,28 @@ def generate_ansible(request) -> str:
       until: k3s_ready.rc == 0""")
 
         elif pkg_lower == "nginx":
-            tasks.append(f"""\
+            if is_ubuntu:
+                tasks.append("""\
     - name: Install Nginx
-      {pkg_mgr}:
+      apt:
+        name: nginx
+        state: present
+
+    - name: Start and enable Nginx
+      service:
+        name: nginx
+        state: started
+        enabled: yes""")
+            else:
+                tasks.append("""\
+    - name: Enable nginx via amazon-linux-extras
+      shell: amazon-linux-extras enable nginx1 -y
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Install Nginx
+      yum:
         name: nginx
         state: present
 
@@ -151,10 +164,81 @@ def generate_ansible(request) -> str:
         update_cache: yes""")
             else:
                 tasks.append("""\
-    - name: Install NodeJS
+    - name: Install NodeJS (Amazon Linux / RHEL compatible)
       shell: |
-        curl -fsSL https://rpm.nodesource.com/setup_18.x | bash -
-        yum install -y nodejs
+        set -e
+        if command -v amazon-linux-extras >/dev/null 2>&1; then
+          amazon-linux-extras enable nodejs >/dev/null 2>&1 || true
+          amazon-linux-extras install -y nodejs
+        elif yum install -y nodejs; then
+          echo "Installed nodejs from OS repositories"
+        else
+          # Fallback for older glibc hosts: prefer NodeSource 16.x over 18.x
+          curl -fsSL https://rpm.nodesource.com/setup_16.x | bash -
+          yum install -y nodejs
+        fi
+      args:
+        executable: /bin/bash""")
+
+        elif pkg_lower == "node_exporter":
+            tasks.append("""\
+    - name: Install node_exporter
+      shell: |
+        set -e
+        if ! id -u node_exporter >/dev/null 2>&1; then
+          useradd --system --no-create-home --shell /usr/sbin/nologin node_exporter
+        fi
+        curl -fsSL https://github.com/prometheus/node_exporter/releases/download/v1.8.1/node_exporter-1.8.1.linux-amd64.tar.gz -o /tmp/node_exporter.tar.gz
+        tar -xzf /tmp/node_exporter.tar.gz -C /tmp
+        install -m 0755 /tmp/node_exporter-1.8.1.linux-amd64/node_exporter /usr/local/bin/node_exporter
+      args:
+        executable: /bin/bash
+
+    - name: Configure node_exporter systemd unit
+      copy:
+        dest: /etc/systemd/system/node_exporter.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Prometheus Node Exporter
+          After=network.target
+
+          [Service]
+          User=node_exporter
+          Group=node_exporter
+          Type=simple
+          ExecStart=/usr/local/bin/node_exporter
+          Restart=always
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Enable and start node_exporter
+      systemd:
+        name: node_exporter
+        daemon_reload: yes
+        state: started
+        enabled: yes""")
+
+        elif pkg_lower == "cadvisor":
+            tasks.append("""\
+    - name: Run cAdvisor when Docker is available
+      shell: |
+        set -e
+        if ! command -v docker >/dev/null 2>&1; then
+          echo "Docker is not installed; skipping cAdvisor setup."
+          exit 0
+        fi
+        docker rm -f cadvisor >/dev/null 2>&1 || true
+        docker run -d \
+          --name=cadvisor \
+          --restart=unless-stopped \
+          -p 8080:8080 \
+          -v /:/rootfs:ro \
+          -v /var/run:/var/run:ro \
+          -v /sys:/sys:ro \
+          -v /var/lib/docker/:/var/lib/docker:ro \
+          gcr.io/cadvisor/cadvisor:latest
       args:
         executable: /bin/bash""")
 
@@ -164,6 +248,70 @@ def generate_ansible(request) -> str:
       {pkg_mgr}:
         name: {pkg_lower}
         state: present""")
+    return tasks
+
+
+def _build_system_update_task(is_ubuntu: bool) -> str:
+    if is_ubuntu:
+        return """\
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600"""
+    return """\
+    - name: Wait for cloud-init to finish
+      shell: cloud-init status --wait 2>/dev/null || true
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Wait for yum or dnf processes to exit
+      shell: |
+        for i in {1..60}; do
+          if ! pgrep -x yum > /dev/null 2>&1 && ! pgrep -x dnf > /dev/null 2>&1; then
+            exit 0
+          fi
+          sleep 5
+        done
+        exit 0
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Update yum cache
+      yum:
+        update_cache: yes
+      register: yum_cache_update
+      retries: 5
+      delay: 20
+      until: yum_cache_update is succeeded"""
+
+
+def _build_custom_command_tasks(
+    custom_commands: Optional[str],
+    prefix: str = "Custom command",
+) -> list[str]:
+    tasks: list[str] = []
+    if not (custom_commands and custom_commands.strip()):
+        return tasks
+    for idx, cmd in enumerate(custom_commands.strip().splitlines(), start=1):
+        cmd = cmd.strip()
+        if cmd:
+            tasks.append(f"""\
+    - name: "{prefix} {idx}: {cmd[:60]}"
+      shell: {cmd}
+      args:
+        executable: /bin/bash""")
+    return tasks
+
+
+def generate_ansible(request) -> str:
+    is_ubuntu = request.os_type == "ubuntu"
+    pkg_mgr = "apt" if is_ubuntu else "yum"
+    ssh_user = "ubuntu" if is_ubuntu else "ec2-user"
+
+    tasks: List[str] = [_build_system_update_task(is_ubuntu)]
+    tasks.extend(_build_package_tasks(request.packages, is_ubuntu, pkg_mgr))
 
     # ── Docker container deployment ──────────────────────────────────────────
     if request.docker_image and request.docker_image.strip():
@@ -205,16 +353,7 @@ def generate_ansible(request) -> str:
       args:
         executable: /bin/bash""")
 
-    # ── Custom commands ──────────────────────────────────────────────────────
-    if request.custom_commands and request.custom_commands.strip():
-        for idx, cmd in enumerate(request.custom_commands.strip().splitlines(), start=1):
-            cmd = cmd.strip()
-            if cmd:
-                tasks.append(f"""\
-    - name: "Custom command {idx}: {cmd[:60]}"
-      shell: {cmd}
-      args:
-        executable: /bin/bash""")
+    tasks.extend(_build_custom_command_tasks(request.custom_commands))
 
     tasks.append("""\
     - name: Deployment complete
@@ -232,6 +371,55 @@ def generate_ansible(request) -> str:
 
 - name: Configure DevOps Portal Servers
   hosts: servers
+  become: yes
+  gather_facts: yes
+  vars:
+    ansible_user: {ssh_user}
+
+  tasks:
+{tasks_yaml}
+"""
+    return playbook
+
+
+def generate_ansible_for_host(
+    instance: dict,
+    packages: List[str],
+    custom_commands: str = "",
+) -> str:
+    """
+    Build a single-host playbook targeted at a specific EC2 instance. Used for
+    day-2 package additions triggered from the portal's Instances tab.
+
+    `instance` must expose at minimum: public_ip, ssh_user, os_type.
+    """
+    os_type = instance.get("os_type") or "amazon_linux"
+    is_ubuntu = os_type == "ubuntu"
+    pkg_mgr = "apt" if is_ubuntu else "yum"
+    ssh_user = instance.get("ssh_user") or ("ubuntu" if is_ubuntu else "ec2-user")
+
+    tasks: List[str] = [_build_system_update_task(is_ubuntu)]
+    tasks.extend(_build_package_tasks(packages, is_ubuntu, pkg_mgr))
+    tasks.extend(
+        _build_custom_command_tasks(custom_commands, prefix="Post-install command")
+    )
+    tasks.append("""\
+    - name: Configuration complete
+      debug:
+        msg: "Packages applied successfully to {{ inventory_hostname }}!" """)
+
+    tasks_yaml = "\n\n".join(tasks)
+
+    playbook = f"""---
+# ============================================================
+# Generated by DevOps Automation Portal (day-2 instance update)
+# Instance : {instance.get("id", "unknown")}
+# OS Type  : {os_type}
+# Packages : {", ".join(packages) if packages else "none"}
+# ============================================================
+
+- name: Apply package updates to {instance.get("id", "target instance")}
+  hosts: target
   become: yes
   gather_facts: yes
   vars:

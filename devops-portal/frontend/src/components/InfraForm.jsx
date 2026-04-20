@@ -16,12 +16,14 @@ const INSTANCE_TYPES = [
 ]
 
 const PACKAGE_OPTIONS = [
-  { id: 'docker',     label: 'Docker',      icon: '🐳' },
-  { id: 'kubernetes', label: 'Kubernetes',  icon: '☸️' },
-  { id: 'nginx',      label: 'Nginx',       icon: '🌐' },
-  { id: 'git',        label: 'Git',         icon: '📦' },
-  { id: 'python3',    label: 'Python 3',    icon: '🐍' },
-  { id: 'nodejs',     label: 'Node.js',     icon: '⬡' },
+  { id: 'docker', label: 'Docker', icon: '🐳' },
+  { id: 'kubernetes', label: 'Kubernetes', icon: '☸️' },
+  { id: 'nginx', label: 'Nginx', icon: '🌐' },
+  { id: 'git', label: 'Git', icon: '📦' },
+  { id: 'python3', label: 'Python 3', icon: '🐍' },
+  { id: 'nodejs', label: 'Node.js', icon: '⬡' },
+  { id: 'node_exporter', label: 'Node Exporter', icon: '📈' },
+  { id: 'cadvisor', label: 'cAdvisor', icon: '📊' },
 ]
 
 function SectionHeader({ icon: Icon, title, color = 'text-blue-400' }) {
@@ -41,7 +43,7 @@ export default function InfraForm({ formData, onChange, onPlan, onDeploy, isRunn
   const addPort = () => {
     const port = parseInt(portInput)
     if (!isNaN(port) && port > 0 && port <= 65535 &&
-        !formData.security_group_ports.includes(port)) {
+      !formData.security_group_ports.includes(port)) {
       set('security_group_ports', [...formData.security_group_ports, port])
     }
     setPortInput('')
@@ -175,7 +177,7 @@ export default function InfraForm({ formData, onChange, onPlan, onDeploy, isRunn
             <div className="flex gap-2">
               {[
                 { id: 'amazon_linux', label: 'Amazon Linux 2', icon: '🔺' },
-                { id: 'ubuntu',       label: 'Ubuntu 22.04',   icon: '🟠' },
+                { id: 'ubuntu', label: 'Ubuntu 22.04', icon: '🟠' },
               ].map(os => (
                 <button
                   key={os.id}
@@ -263,7 +265,7 @@ export default function InfraForm({ formData, onChange, onPlan, onDeploy, isRunn
             >
               {formData.kubernetes
                 ? <ToggleRight size={28} className="text-emerald-400" />
-                : <ToggleLeft  size={28} />}
+                : <ToggleLeft size={28} />}
             </button>
           </div>
 

@@ -2,9 +2,11 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import InfraForm from './components/InfraForm'
 import LogsPanel from './components/LogsPanel'
 import DeploymentHistory from './components/DeploymentHistory'
+import Instances from './components/Instances'
 import StatusBadge from './components/StatusBadge'
 import {
-  Server, Activity, History, Zap, GitBranch, RefreshCw, Terminal
+  Server, Activity, History, Zap, GitBranch, RefreshCw, Terminal, ExternalLink,
+  ServerCog,
 } from 'lucide-react'
 
 const API = ''  // proxied via Vite → http://localhost:8000
@@ -17,7 +19,7 @@ const DEFAULT_FORM = {
   key_pair_name: '',
   security_group_ports: [22, 80, 443],
   os_type: 'amazon_linux',
-  packages: [],
+  packages: ['node_exporter'],
   custom_commands: '',
   docker_image: '',
   kubernetes: false,
@@ -32,6 +34,11 @@ export default function App() {
   const [deploymentId, setDeploymentId] = useState(null)
   const [history, setHistory] = useState([])
   const [loadingHistory, setLoadingHistory] = useState(false)
+  const [executionMeta, setExecutionMeta] = useState({
+    executionMode: 'local',
+    externalRef: null,
+    externalUrl: null,
+  })
   const esRef = useRef(null)
 
   const fetchHistory = useCallback(async () => {
@@ -63,7 +70,14 @@ export default function App() {
         // Refresh final status from server
         fetch(`${API}/api/deploy/${id}/status`)
           .then(r => r.json())
-          .then(({ status: s }) => setStatus(s))
+          .then(({ status: s, execution_mode, external_ref, external_url }) => {
+            setStatus(s)
+            setExecutionMeta({
+              executionMode: execution_mode || 'local',
+              externalRef: external_ref || null,
+              externalUrl: external_url || null,
+            })
+          })
           .catch(() => {})
         fetchHistory()
         return
@@ -81,6 +95,11 @@ export default function App() {
     setLogs([])
     setStatus('pending')
     setDeploymentId(null)
+    setExecutionMeta({
+      executionMode: 'local',
+      externalRef: null,
+      externalUrl: null,
+    })
 
     try {
       const res = await fetch(`${API}/api/${mode}`, {
@@ -94,8 +113,18 @@ export default function App() {
         throw new Error(err)
       }
 
-      const { deployment_id } = await res.json()
+      const {
+        deployment_id,
+        execution_mode,
+        external_ref,
+        external_url,
+      } = await res.json()
       setDeploymentId(deployment_id)
+      setExecutionMeta({
+        executionMode: execution_mode || 'local',
+        externalRef: external_ref || null,
+        externalUrl: external_url || null,
+      })
       setStatus('running')
       startStream(deployment_id)
     } catch (err) {
@@ -105,8 +134,9 @@ export default function App() {
   }
 
   const navItems = [
-    { id: 'deploy',  label: 'Deploy',  icon: Zap },
-    { id: 'history', label: 'History', icon: History },
+    { id: 'deploy',    label: 'Deploy',    icon: Zap },
+    { id: 'instances', label: 'Instances', icon: ServerCog },
+    { id: 'history',   label: 'History',   icon: History },
   ]
 
   return (
@@ -144,10 +174,33 @@ export default function App() {
           <div className="ml-auto flex items-center gap-3">
             {/* Active deployment badge */}
             {deploymentId && (
-              <div className="hidden sm:flex items-center gap-2 text-xs text-gray-500 font-mono">
-                <GitBranch size={12} />
-                <span className="truncate max-w-[200px]">{deploymentId}</span>
-              </div>
+              <>
+                <div className="hidden sm:flex items-center gap-2 text-xs text-gray-500 font-mono">
+                  <GitBranch size={12} />
+                  <span className="truncate max-w-[200px]">{deploymentId}</span>
+                </div>
+                <div className="hidden md:flex items-center gap-2 text-xs text-gray-500">
+                  <span className="uppercase tracking-wide">
+                    {executionMeta.executionMode || 'local'}
+                  </span>
+                  {executionMeta.externalRef && (
+                    <span className="font-mono text-gray-600">
+                      #{executionMeta.externalRef}
+                    </span>
+                  )}
+                  {executionMeta.externalUrl && (
+                    <a
+                      href={executionMeta.externalUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300"
+                    >
+                      <ExternalLink size={12} />
+                      Jenkins
+                    </a>
+                  )}
+                </div>
+              </>
             )}
             <StatusBadge status={status} />
           </div>
@@ -196,6 +249,10 @@ export default function App() {
           </div>
         )}
 
+        {activeTab === 'instances' && (
+          <Instances />
+        )}
+
         {activeTab === 'history' && (
           <div className="flex flex-col gap-4">
             <div className="flex items-center justify-between">
@@ -215,8 +272,13 @@ export default function App() {
             <DeploymentHistory
               history={history}
               loading={loadingHistory}
-              onSelect={(id) => {
-                setDeploymentId(id)
+              onSelect={(row) => {
+                setDeploymentId(row.id)
+                setExecutionMeta({
+                  executionMode: row.execution_mode || 'local',
+                  externalRef: row.external_ref || null,
+                  externalUrl: row.external_url || null,
+                })
                 setActiveTab('deploy')
               }}
             />

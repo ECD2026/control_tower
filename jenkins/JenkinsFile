@@ -1,0 +1,174 @@
+pipeline {
+  agent { label 'wsl' }
+
+  options {
+    disableConcurrentBuilds()
+    timestamps()
+  }
+
+  parameters {
+    choice(name: 'DEPLOY_MODE', choices: ['plan', 'deploy'], description: 'Run plan-only or full deploy')
+    string(name: 'DEPLOYMENT_ID', defaultValue: '', description: 'Portal deployment identifier')
+    string(name: 'PROVIDER', defaultValue: 'aws', description: 'Cloud provider')
+    string(name: 'REGION', defaultValue: 'us-east-1', description: 'AWS region')
+    string(name: 'INSTANCE_TYPE', defaultValue: 't2.micro', description: 'Instance type')
+    string(name: 'INSTANCE_COUNT', defaultValue: '1', description: 'Number of instances')
+    string(name: 'KEY_PAIR_NAME', defaultValue: '', description: 'Existing AWS key pair name')
+    string(name: 'SECURITY_GROUP_PORTS_JSON', defaultValue: '[22, 80, 443]', description: 'JSON array of inbound ports')
+    choice(name: 'OS_TYPE', choices: ['amazon_linux', 'ubuntu'], description: 'Base operating system')
+    string(name: 'PACKAGES_JSON', defaultValue: '[]', description: 'JSON array of packages to install')
+    text(name: 'CUSTOM_COMMANDS', defaultValue: '', description: 'Optional custom shell commands')
+    string(name: 'DOCKER_IMAGE', defaultValue: '', description: 'Optional Docker image to run')
+    booleanParam(name: 'KUBERNETES', defaultValue: false, description: 'Deploy with k3s')
+    string(name: 'REPLICAS', defaultValue: '1', description: 'Replica count when Kubernetes is enabled')
+  }
+
+  environment {
+    TF_IN_AUTOMATION  = 'true'
+    PYTHONUNBUFFERED  = '1'
+    PYTHONUTF8        = '1'
+    PYTHONIOENCODING  = 'utf-8'
+    AWS_CREDENTIALS_ID = 'aws-portal-credentials'
+    SSH_CREDENTIALS_ID = 'portal-ssh-key'
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        checkout scm
+        script {
+          currentBuild.description = "${params.DEPLOY_MODE} ${params.REGION} ${params.INSTANCE_TYPE} x${params.INSTANCE_COUNT}"
+        }
+      }
+    }
+
+    stage('Validate Agent') {
+      steps {
+        script {
+          if (isUnix()) {
+            sh 'python3 --version && terraform version && ansible --version && ssh -V'
+          } else {
+            // Python and Terraform run natively on Windows
+            bat 'python --version'
+            bat '"C:\\Users\\Asus\\develop\\terraform\\terraform.exe" version'
+            // Ansible and SSH live inside WSL
+            bat 'wsl -- bash -lc "ansible --version && ssh -V"'
+          }
+        }
+      }
+    }
+
+    stage('Validate Inputs') {
+      steps {
+        script {
+          if (!params.KEY_PAIR_NAME?.trim()) {
+            error('KEY_PAIR_NAME is required.')
+          }
+        }
+      }
+    }
+
+    stage('Prepare Python Environment') {
+      steps {
+        dir('devops-portal/backend') {
+          script {
+            if (isUnix()) {
+              sh '''
+                python3 -m venv .venv-jenkins
+                . .venv-jenkins/bin/activate
+                python -m pip install --upgrade pip
+                pip install -r requirements.txt ansible
+              '''
+            } else {
+              // Run Python natively on Windows — ansible is NOT installed here
+              // because runner.py routes ansible-playbook through wsl on win32.
+              bat '''
+                python -m venv .venv-jenkins
+                .venv-jenkins\\Scripts\\python -m pip install --upgrade pip
+                .venv-jenkins\\Scripts\\pip install -r requirements.txt
+              '''
+            }
+          }
+        }
+      }
+    }
+
+    stage('Run Portal Deployment') {
+      steps {
+        dir('devops-portal/backend') {
+          withCredentials([
+            usernamePassword(
+              credentialsId: "${env.AWS_CREDENTIALS_ID}",
+              usernameVariable: 'AWS_ACCESS_KEY_ID',
+              passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+            ),
+            sshUserPrivateKey(
+              credentialsId: "${env.SSH_CREDENTIALS_ID}",
+              keyFileVariable: 'PORTAL_SSH_KEY_FILE'
+            )
+          ]) {
+            withEnv([
+              "DEPLOY_MODE=${params.DEPLOY_MODE}",
+              "DEPLOYMENT_ID=${params.DEPLOYMENT_ID}",
+              "PROVIDER=${params.PROVIDER}",
+              "REGION=${params.REGION}",
+              "INSTANCE_TYPE=${params.INSTANCE_TYPE}",
+              "INSTANCE_COUNT=${params.INSTANCE_COUNT}",
+              "KEY_PAIR_NAME=${params.KEY_PAIR_NAME}",
+              "SECURITY_GROUP_PORTS_JSON=${params.SECURITY_GROUP_PORTS_JSON}",
+              "OS_TYPE=${params.OS_TYPE}",
+              "PACKAGES_JSON=${params.PACKAGES_JSON}",
+              "CUSTOM_COMMANDS=${params.CUSTOM_COMMANDS}",
+              "DOCKER_IMAGE=${params.DOCKER_IMAGE}",
+              "KUBERNETES=${params.KUBERNETES}",
+              "REPLICAS=${params.REPLICAS}",
+              "AWS_DEFAULT_REGION=${params.REGION}",
+              "ANSIBLE_HOST_KEY_CHECKING=False",
+              "DB_PATH=C:\\Users\\Asus\\Documents\\GitHub\\control_tower\\devops-portal\\backend\\deployments.db"
+            ]) {
+              script {
+                if (isUnix()) {
+                  sh '''
+                    set -eu
+                    mkdir -p "$HOME/.ssh"
+                    cp "$PORTAL_SSH_KEY_FILE" "$HOME/.ssh/${KEY_PAIR_NAME}.pem"
+                    chmod 600 "$HOME/.ssh/${KEY_PAIR_NAME}.pem"
+                    . .venv-jenkins/bin/activate
+                    python scripts/run_portal_deployment.py
+                  '''
+                } else {
+                  // Copy the PEM into WSL's ~/.ssh so that runner.py's
+                  // "wsl -- ssh -i /home/<user>/.ssh/<key>.pem" resolves correctly.
+                  // Python runs natively (win32) so runner.py routes
+                  // Terraform → Windows exe, Ansible/SSH → wsl.
+                  bat """
+                    wsl -- bash -lc "mkdir -p ~/.ssh && cp \$(wslpath '${env.PORTAL_SSH_KEY_FILE}') ~/.ssh/${params.KEY_PAIR_NAME}.pem && chmod 600 ~/.ssh/${params.KEY_PAIR_NAME}.pem"
+                    .venv-jenkins\\Scripts\\python scripts\\run_portal_deployment.py
+                  """
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  post {
+    always {
+      dir('devops-portal/backend') {
+        archiveArtifacts artifacts: '**/main.tf, **/setup.yml, **/inventory.ini',
+                         allowEmptyArchive: true, onlyIfSuccessful: false
+      }
+    }
+    cleanup {
+      script {
+        if (isUnix()) {
+          sh 'rm -f "$HOME/.ssh/${KEY_PAIR_NAME}.pem" || true'
+        } else {
+          bat "wsl -- bash -lc \"rm -f ~/.ssh/${params.KEY_PAIR_NAME}.pem || true\""
+        }
+      }
+    }
+  }
+}

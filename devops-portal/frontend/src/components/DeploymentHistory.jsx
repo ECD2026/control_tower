@@ -71,7 +71,7 @@ export default function DeploymentHistory({ history = [], loading = false, onSel
               </td>
               <td className="px-4 py-3 text-right">
                 <button
-                  onClick={() => onSelect?.(row.id)}
+                  onClick={() => onSelect?.(row)}
                   className="opacity-0 group-hover:opacity-100 text-gray-500 hover:text-blue-400
                              transition-all p-1 rounded"
                   title="View logs"
