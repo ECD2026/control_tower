@@ -1,0 +1,23 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "Frontend (Vite)",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "devops-portal/frontend", "run", "dev"],
+      "port": 5173
+    },
+    {
+      "name": "Backend (FastAPI)",
+      "runtimeExecutable": "uvicorn",
+      "runtimeArgs": [
+        "main:app",
+        "--reload",
+        "--host", "0.0.0.0",
+        "--port", "8000",
+        "--app-dir", "devops-portal/backend"
+      ],
+      "port": 8000
+    }
+  ]
+}

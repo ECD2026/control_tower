@@ -1,0 +1,14 @@
+global:
+  scrape_interval: 30s
+
+scrape_configs:
+  - job_name: node
+    file_sd_configs:
+      - files: ['/etc/prometheus/targets/instances.json']
+        refresh_interval: 15s
+    relabel_configs:
+      - source_labels: [__address__]
+        regex: '(.*):.*'
+        target_label: instance_host
+      - source_labels: [instance_id]
+        target_label: instance
