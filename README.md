@@ -1,74 +1,102 @@
-## AWS Organizational Unit Control Tower
-(DevOps Automation Portal)
+## AWS ORGANISATIONAL UNIT CONTROL TOWER
+DevOps Automation Portal with Jenkins, Terraform, Ansible & Monitoring
 
-# Overview
+# Project Overview
 
-This project implements an end-to-end DevOps Automation Portal that enables users to provision and manage AWS infrastructure through a web-based interface.
+AWS Organisational Unit Control Tower is a DevOps Automation Portal designed to automate the lifecycle of cloud infrastructure—from provisioning to configuration, management, and monitoring.
 
-The system integrates Terraform, Ansible, and FastAPI to automate infrastructure provisioning, server configuration, and deployment, simulating a real-world enterprise DevOps environment with minimal manual intervention.
+The system integrates industry-standard tools to provide a centralized platform for managing AWS resources efficiently using DevOps practices.
 
 # Objectives
-Automate infrastructure provisioning using Infrastructure as Code (IaC)
-Provide a self-service web portal for DevOps operations
-Enable dynamic generation of Terraform and Ansible configurations
-Ensure secure and scalable deployments on AWS
-Provide real-time logs and deployment status tracking
+Automate infrastructure provisioning using Infrastructure as Code
+Enable seamless configuration of instances
+Provide centralized control over multiple AWS resources
+Support Day-2 operations (post-deployment management)
+Integrate monitoring for real-time system insights
+Improve scalability, reliability, and efficiency
 
-# System Architecture
-<img width="2662" height="1088" alt="image" src="https://github.com/user-attachments/assets/64f84a4c-7b90-43a7-ad1a-8
+# Architecture Overview
+Frontend (UI)
+     ↓
+Backend (FastAPI)
+     ↓
+Jenkins (Execution Engine)
+     ↓
+Terraform (Infrastructure Provisioning)
+     ↓
+AWS EC2 (Cloud Resources)
+     ↓
+Ansible (Configuration Management)
+     ↓
+Monitoring (Prometheus + Grafana)
 
-# STEP 1:- User fills form:
+# Tech Stack
+Category	Tools Used
+Frontend	React (Vite)
+Backend	FastAPI (Python)
+CI/CD	Jenkins
+Infrastructure	Terraform
+Configuration	Ansible
+Cloud	AWS EC2
+Monitoring	Prometheus & Grafana
+Containerization	Docker
+Orchestration Kubernetes
 
-Cloud provider, region, instance type
-Packages (Docker, Nginx, etc.)
-Deployment preferences (Kubernetes, replicas)
+# Features
+- 1. Automated Deployment
+One-click infrastructure creation
+Uses Terraform for AWS provisioning
+Supports multiple configurations
+- 2. Configuration Management
+Ansible automates:
+Package installation
+Software setup
+Custom commands
+- 3. Jenkins Integration
+Backend triggers Jenkins pipelines
+Secure and scalable execution
+Real-time logs streaming
+- 4. Instance Management (Day-2 Operations)
+View all deployed instances
+Install additional packages anytime
+Apply updates without redeployment
+- 5. Monitoring System
+Prometheus collects metrics
+Grafana visualizes:
+CPU usage
+Memory usage
+Network stats
+- 6. Docker & Kubernetes Support
+Deploy containerized applications
+Optional Kubernetes orchestration
 
-# STEP 2:- API Request
+# How It Works
+User submits deployment request via UI
+Backend validates and sends request to Jenkins
+Jenkins pipeline executes:
+Terraform → creates AWS infrastructure
+Ansible → configures instances
+Instance details are stored in database
+User can manage instances later (Day-2 ops)
+Monitoring tools track performance in real-time
 
-Frontend sends:
-
-POST /deploy
-
-With JSON payload to FastAPI
-
-# STEP 3:- Backend Processing
-Generates:
-Terraform configuration (main.tf)
-Ansible playbook (setup.yml)
-Stores files temporarily
-
-# STEP 4:- Infrastructure Provisioning
-terraform init
-terraform apply
-
-👉 Creates EC2 instances on AWS
-
-# STEP 5:- Configuration Management
-ansible-playbook setup.yml
-
-👉 Installs packages and configures servers
-
-# STEP 6:- Deployment
-Docker container setup OR
-Kubernetes deployment (if selected)
-
-# STEP 7:-Monitoring & Logs
-Logs streamed to frontend in real-time
-Status shown:
-Pending
-Running
-Success
-Failed
-# Security Best Practices
-❌ No hardcoded credentials
-✅ Use environment variables for AWS access
-✅ IAM role-based access control
-✅ Secure API handling
-✅ Temporary file storage
+# Security Features
+Separation of execution via Jenkins
+Secure credential handling (AWS keys, SSH keys)
+Controlled network access via AWS Security Groups
+Restricted monitoring ports
+Logging and traceability through pipelines
 
 # Future Enhancements
-Deployment history tracking
-Multi-cloud support (GCP, Azure)
-Kubernetes auto-scaling
-Role-based user authentication
-Advanced monitoring dashboards
+Integrate security tools (Trivy, SonarQube)
+Add Role-Based Access Control (RBAC)
+Use AWS Control Tower for real OU management
+Implement CI/CD pipelines for application deployment
+Add multi-cloud support
+
+# Conclusion
+
+This project demonstrates how multiple DevOps tools can be integrated into a single automation platform to simplify cloud infrastructure management, improve efficiency, and enable scalability.
+🧾 Conclusion
+
+This project demonstrates how multiple DevOps tools can be integrated into a single automation platform to simplify cloud infrastructure management, improve efficiency, and enable scalability.
