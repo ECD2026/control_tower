@@ -1,74 +1,115 @@
-## AWS Organizational Unit Control Tower
-(DevOps Automation Portal)
+## AWS ORGANISATIONAL UNIT CONTROL TOWER
 
-# Overview
+# DevOps Automation Portal
 
-This project implements an end-to-end DevOps Automation Portal that enables users to provision and manage AWS infrastructure through a web-based interface.
+# Project Overview
 
-The system integrates Terraform, Ansible, and FastAPI to automate infrastructure provisioning, server configuration, and deployment, simulating a real-world enterprise DevOps environment with minimal manual intervention.
+AWS Organisational Unit Control Tower is a DevOps Automation Portal designed to automate the complete lifecycle of cloud infrastructure — from provisioning and configuration to management and monitoring.
+
+The platform integrates multiple DevOps tools to provide a centralized, efficient, and scalable solution for managing AWS resources.
 
 # Objectives
-Automate infrastructure provisioning using Infrastructure as Code (IaC)
-Provide a self-service web portal for DevOps operations
-Enable dynamic generation of Terraform and Ansible configurations
-Ensure secure and scalable deployments on AWS
-Provide real-time logs and deployment status tracking
+Automate infrastructure provisioning using Infrastructure as Code
+Enable seamless and automated configuration of instances
+Provide centralized control over cloud resources
+Support Day-2 operations (post-deployment management)
+Integrate monitoring for real-time insights
+Improve scalability, reliability, and efficiency
 
-# System Architecture
-<img width="2662" height="1088" alt="image" src="https://github.com/user-attachments/assets/64f84a4c-7b90-43a7-ad1a-8
+# Architecture Overview
 
-# STEP 1:- User fills form:
+Frontend (UI)
+↓
+Backend (FastAPI)
+↓
+Jenkins (Execution Engine)
+↓
+Terraform (Infrastructure Provisioning)
+↓
+AWS EC2 (Cloud Resources)
+↓
+Ansible (Configuration Management)
+↓
+Monitoring (Prometheus + Grafana)
 
-Cloud provider, region, instance type
-Packages (Docker, Nginx, etc.)
-Deployment preferences (Kubernetes, replicas)
+Tech Stack
 
-# STEP 2:- API Request
+Frontend: React (Vite)
+Backend: FastAPI (Python)
+CI/CD: Jenkins
+Infrastructure: Terraform
+Configuration: Ansible
+Cloud: AWS EC2
+Monitoring: Prometheus & Grafana
+Containerization: Docker
+Orchestration: Kubernetes 
 
-Frontend sends:
+# Features
+1. Automated Deployment
+One-click infrastructure provisioning
+Uses Terraform for AWS resource creation
+Supports multiple configurations
+2. Configuration Management
+Automates server setup using Ansible
+Installs required packages and dependencies
+Executes custom commands
+3. Jenkins Integration
+Backend triggers Jenkins pipelines
+Ensures secure and controlled execution
+Provides real-time log streaming
+4. Instance Management (Day-2 Operations)
+View and manage deployed instances
+Install additional packages anytime
+Update systems without redeployment
+5. Monitoring System
+Prometheus collects system metrics
+Grafana visualizes CPU, memory, and network performance
+6. Docker & Kubernetes Support
+Supports containerized application deployment
+Optional Kubernetes orchestration for scaling and management
 
-POST /deploy
+# How It Works
+User submits a deployment request through the UI
+Backend validates the request and triggers Jenkins
+Jenkins pipeline executes:
+Terraform → provisions AWS infrastructure
+Ansible → configures instances
+Deployment logs are streamed to the frontend
+Instance details are stored for future management
+Users can perform Day-2 operations
+Monitoring tools track system performance
+Security Features
+Separation of execution using Jenkins
+Secure handling of AWS credentials and SSH keys
+Controlled access via AWS Security Groups
+Restricted monitoring ports
+Logging and traceability of all operations
 
-With JSON payload to FastAPI
+# Project Structure
 
-# STEP 3:- Backend Processing
-Generates:
-Terraform configuration (main.tf)
-Ansible playbook (setup.yml)
-Stores files temporarily
-
-# STEP 4:- Infrastructure Provisioning
-terraform init
-terraform apply
-
-👉 Creates EC2 instances on AWS
-
-# STEP 5:- Configuration Management
-ansible-playbook setup.yml
-
-👉 Installs packages and configures servers
-
-# STEP 6:- Deployment
-Docker container setup OR
-Kubernetes deployment (if selected)
-
-# STEP 7:-Monitoring & Logs
-Logs streamed to frontend in real-time
-Status shown:
-Pending
-Running
-Success
-Failed
-# Security Best Practices
-❌ No hardcoded credentials
-✅ Use environment variables for AWS access
-✅ IAM role-based access control
-✅ Secure API handling
-✅ Temporary file storage
+devops-portal/
+│
+├── frontend/
+├── backend/
+│ ├── routes/
+│ ├── services/
+│ ├── generators/
+│ └── database/
+│
+├── jenkins/
+├── monitoring/
+├── docker-compose.yml
+└── docs/
 
 # Future Enhancements
-Deployment history tracking
-Multi-cloud support (GCP, Azure)
-Kubernetes auto-scaling
-Role-based user authentication
-Advanced monitoring dashboards
+Integrate security tools like Trivy and SonarQube
+Implement Role-Based Access Control (RBAC)
+Extend support to AWS Control Tower for real OU management
+Add advanced CI/CD pipelines for application deployment
+Enable multi-cloud support
+Conclusion
+Provides a centralized platform for DevOps automation
+Reduces manual effort and configuration errors
+Enables scalable and efficient infrastructure management
+Integrates provisioning, configuration, and monitoring in one system
+Demonstrates practical implementation of DevOps tools and practices
