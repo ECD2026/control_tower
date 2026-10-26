@@ -28,8 +28,7 @@ every AWS call is made with **that user's** keys.
 
 ```mermaid
 flowchart LR
-    U[Browser] -- HTTPS --> CF[CloudFront<br/>*.cloudfront.net]
-    CF -- HTTP, CloudFront IPs only --> NG
+    U[Browser] -- HTTP :80<br/>Elastic IP --> NG
 
     subgraph HOST["EC2 portal host (docker compose)"]
         NG[nginx<br/>frontend container]
@@ -63,7 +62,7 @@ flowchart LR
 | **Grafana** | `monitoring/grafana/` | Provisioned datasource + two dashboards: *Fleet Overview* and *Instance Overview*. Embedded in the UI. |
 | **Deploy workflow** | `.github/workflows/portal-deploy.yml` | Runs Terraform + Ansible for one deployment. |
 | **Release workflow** | `.github/workflows/portal-release.yml` | Tests the portal and redeploys the host over SSM. |
-| **Host infra** | `devops-portal/infra/terraform` | EC2 host, CloudFront, IAM, SSM parameters. |
+| **Host infra** | `devops-portal/infra/terraform` | EC2 host, Elastic IP, IAM, SSM parameters. |
 
 ---
 
@@ -249,7 +248,7 @@ labels so dashboards join both sources.
 
 | Concern | How it is handled |
 |---|---|
-| Transport | CloudFront terminates HTTPS. The EC2 security group admits port 80 **only from CloudFront's origin-facing prefix list**; there is no SSH (SSM Session Manager only). Cookies are `Secure` on the host. |
+| Transport | **Plain HTTP** on the host's Elastic IP. The security group admits port 80 only from `http_ingress_cidrs` (default `0.0.0.0/0`; narrow it); there is no SSH (SSM Session Manager only). Without TLS, passwords and uploaded AWS keys cross the network unencrypted, so cookies are not `Secure`. |
 | Passwords | scrypt, per-user salt; uniform error for unknown email / bad password. |
 | Sessions | HS256 JWT in an HttpOnly, SameSite=Lax cookie (also blocks cross-site POST). |
 | AWS keys & SSH private keys at rest | Fernet (`PORTAL_ENCRYPTION_KEY`), never returned by the API. |
@@ -283,7 +282,7 @@ Everything is named so it can be told apart in the AWS console at a glance.
 
 | Owner | Resource | Name / tags |
 |---|---|---|
-| Portal host stack (Terraform) | EC2, SG, EIP, IAM roles, profile, CloudFront | `devops-portal-host`, `devops-portal-host-sg`, `-eip`, `-role`, `-profile`, `-github-release`, `-cdn`; tags `Project=devops-portal`, `Component=portal-host`, `ManagedBy=terraform` |
+| Portal host stack (Terraform) | EC2, SG, EIP, IAM roles, profile | `devops-portal-host`, `devops-portal-host-sg`, `-eip`, `-role`, `-profile`, `-github-release`; tags `Project=devops-portal`, `Component=portal-host`, `ManagedBy=terraform` |
 | Portal host config | SSM parameters | `/devops-portal/<name>` (`encryption_key`, `jwt_secret`, `workflow_key`, `github_token`, `grafana_admin_password`, `runner_mode`, `allow_signup`, `public_host`, `monitoring_sg_id`, `monitoring_sg_region`, `github_repo`) |
 | User deployments | Security group | `devops-portal-<deployment8>-sg-<random>` |
 | | Key pair | `devops-portal-<deployment8>-<key name>-<random>` |

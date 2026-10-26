@@ -87,7 +87,7 @@ Security Features
 Per-user accounts; every resource and action is scoped to its owner
 Separation of execution using GitHub Actions
 AWS credentials and SSH keys encrypted at rest and in transit to the runner
-HTTPS via CloudFront; monitoring UIs only reachable after login
+Monitoring UIs only reachable after login
 Controlled access via AWS Security Groups
 Restricted monitoring ports
 Logging and traceability of all operations

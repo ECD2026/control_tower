@@ -31,18 +31,20 @@ grafana_admin_password, github_token, runner_mode, allow_signup}` and the
 `PORTAL_WORKFLOW_KEY` repository secret. It is safe to re-run; existing keys
 are kept.
 
-### A2. Portal host (EC2 + CloudFront)
+### A2. Portal host (EC2 + Elastic IP)
 
 ```bash
 cd devops-portal/infra/terraform
 terraform init
 terraform apply -var git_ref=main      # or a feature branch to try it out
+# restrict who can reach the portal (plain HTTP):
+#   terraform apply -var 'http_ingress_cidrs=["<your-ip>/32"]'
 terraform output
 ```
 
 | Output | Use |
 |---|---|
-| `portal_url` | `https://dxxxx.cloudfront.net` — open this |
+| `portal_url` | `http://ec2-x-x-x-x.ap-south-1.compute.amazonaws.com` — open this |
 | `instance_id` | SSM target for the release workflow |
 | `github_release_role_arn` | release workflow role |
 
@@ -53,8 +55,6 @@ up`. Follow it with:
 aws ssm start-session --target <instance_id> --region ap-south-1
 sudo tail -f /var/log/devops-portal-bootstrap.log
 ```
-
-The CloudFront distribution needs ~5 minutes to deploy globally.
 
 ### A3. Release pipeline variables
 

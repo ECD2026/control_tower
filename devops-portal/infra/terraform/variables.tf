@@ -22,6 +22,15 @@ variable "root_volume_gb" {
   default     = 30
 }
 
+variable "http_ingress_cidrs" {
+  description = <<-EOT
+    CIDRs allowed to reach the portal on port 80. The portal is served over
+    plain HTTP, so restrict this (e.g. ["203.0.113.7/32"]) for real use.
+  EOT
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
+}
+
 variable "github_repo" {
   description = "owner/name of the repository the host deploys from"
   type        = string

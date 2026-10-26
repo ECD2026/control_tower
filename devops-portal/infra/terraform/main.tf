@@ -1,10 +1,10 @@
 # ============================================================
 # DevOps portal host
 #
-#   Browser --HTTPS--> CloudFront --HTTP--> EC2 (nginx :80) --> containers
+#   Browser --HTTP--> EC2 Elastic IP (nginx :80) --> containers
 #
-# - The EC2 security group only admits CloudFront's origin-facing IP ranges,
-#   so the plain-HTTP origin is never reachable directly from the internet.
+# - Port 80 is open to var.http_ingress_cidrs. Traffic is plain HTTP (no TLS),
+#   so narrow that list to the networks that actually use the portal.
 # - No SSH: administration is via SSM Session Manager / Run Command.
 # - Secrets live in SSM Parameter Store (SecureString) under var.ssm_prefix,
 #   written by infra/scripts/bootstrap-secrets.sh, read at deploy time.
@@ -20,10 +20,6 @@ data "aws_ssm_parameter" "al2023_ami" {
   name = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"
 }
 
-data "aws_ec2_managed_prefix_list" "cloudfront" {
-  name = "com.amazonaws.global.cloudfront.origin-facing"
-}
-
 locals {
   ssm_arn_prefix = "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter${var.ssm_prefix}"
 }
@@ -32,15 +28,15 @@ locals {
 
 resource "aws_security_group" "host" {
   name        = "${var.name}-sg"
-  description = "DevOps portal host: HTTP from CloudFront only"
+  description = "DevOps portal host: HTTP from allowed CIDRs"
   vpc_id      = data.aws_vpc.default.id
 
   ingress {
-    description     = "HTTP from CloudFront origin-facing ranges"
-    from_port       = 80
-    to_port         = 80
-    protocol        = "tcp"
-    prefix_list_ids = [data.aws_ec2_managed_prefix_list.cloudfront.id]
+    description = "HTTP to the portal"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = var.http_ingress_cidrs
   }
 
   egress {
@@ -160,72 +156,15 @@ resource "aws_eip" "host" {
   }
 }
 
-# ---------- CloudFront (HTTPS front door) ----------
-
-data "aws_cloudfront_cache_policy" "disabled" {
-  name = "Managed-CachingDisabled"
-}
-
-data "aws_cloudfront_origin_request_policy" "all_viewer" {
-  name = "Managed-AllViewer"
-}
-
-resource "aws_cloudfront_distribution" "portal" {
-  enabled         = true
-  comment         = "${var.name} - DevOps portal (HTTPS front door)"
-  price_class     = "PriceClass_200"
-  is_ipv6_enabled = true
-
-  origin {
-    origin_id   = "${var.name}-origin"
-    domain_name = aws_eip.host.public_dns
-
-    custom_origin_config {
-      http_port              = 80
-      https_port             = 443
-      origin_protocol_policy = "http-only"
-      origin_ssl_protocols   = ["TLSv1.2"]
-      # SSE log streams send a keepalive every 15s; leave headroom.
-      origin_read_timeout      = 60
-      origin_keepalive_timeout = 60
-    }
-  }
-
-  # Nothing is cached: the SPA is tiny and everything else is dynamic.
-  default_cache_behavior {
-    target_origin_id         = "${var.name}-origin"
-    viewer_protocol_policy   = "redirect-to-https"
-    allowed_methods          = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
-    cached_methods           = ["GET", "HEAD"]
-    cache_policy_id          = data.aws_cloudfront_cache_policy.disabled.id
-    origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer.id
-    compress                 = true
-  }
-
-  restrictions {
-    geo_restriction {
-      restriction_type = "none"
-    }
-  }
-
-  viewer_certificate {
-    cloudfront_default_certificate = true
-  }
-
-  tags = {
-    Name = "${var.name}-cdn"
-  }
-}
-
 # ---------- Non-secret configuration for the host ----------
 # Secrets (keys, tokens) are written by infra/scripts/bootstrap-secrets.sh so
 # they never land in Terraform state.
 
 resource "aws_ssm_parameter" "public_host" {
   name        = "${var.ssm_prefix}/public_host"
-  description = "Public hostname of the portal (CloudFront)"
+  description = "Public hostname of the portal (Elastic IP DNS name)"
   type        = "String"
-  value       = aws_cloudfront_distribution.portal.domain_name
+  value       = aws_eip.host.public_dns
 }
 
 resource "aws_ssm_parameter" "monitoring_sg" {

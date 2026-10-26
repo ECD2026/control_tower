@@ -1,6 +1,6 @@
 output "portal_url" {
   description = "Open this in a browser"
-  value       = "https://${aws_cloudfront_distribution.portal.domain_name}"
+  value       = "http://${aws_eip.host.public_dns}"
 }
 
 output "instance_id" {
@@ -9,7 +9,7 @@ output "instance_id" {
 }
 
 output "origin_public_dns" {
-  description = "EC2 origin (only reachable from CloudFront)"
+  description = "Public DNS name of the portal host (Elastic IP)"
   value       = aws_eip.host.public_dns
 }
 
