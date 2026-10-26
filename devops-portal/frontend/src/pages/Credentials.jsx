@@ -9,6 +9,7 @@ import {
   KeyRound, Plus, Trash2, Loader2, ShieldCheck, Download, Upload, Sparkles, X,
 } from 'lucide-react'
 import PageHeader from '../components/PageHeader'
+import { useDialog } from '../components/ConfirmDialog'
 import { api, downloadText } from '../lib/api'
 import { REGIONS } from '../components/InfraForm'
 
@@ -155,6 +156,7 @@ export default function Credentials({ onMenu }) {
   const [adding, setAdding] = useState(false)
   const [generated, setGenerated] = useState(null)  // { name, pem } shown once
   const [error, setError] = useState('')
+  const [ask, dialog] = useDialog()
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -174,7 +176,12 @@ export default function Credentials({ onMenu }) {
   }
 
   const remove = async (cred) => {
-    if (!window.confirm(`Delete credentials "${cred.name}"? Deployments using them can no longer be managed.`)) return
+    if (!await ask.confirm({
+      title: 'Delete credentials?',
+      message: `"${cred.name}" will be removed. Deployments using them can no longer be managed.`,
+      confirmLabel: 'Delete',
+      danger: true,
+    })) return
     setError('')
     try {
       await api(`/api/credentials/${cred.id}`, { method: 'DELETE' })
@@ -186,6 +193,7 @@ export default function Credentials({ onMenu }) {
 
   return (
     <>
+      {dialog}
       <PageHeader
         title="Credentials"
         description="AWS access keys and SSH key pairs used for your deployments"
