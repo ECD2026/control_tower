@@ -149,8 +149,6 @@ def _dispatch(
         "packages_json": json.dumps(request.packages),
         "custom_commands": request.custom_commands,
         "docker_image": request.docker_image or "",
-        "kubernetes": "true" if request.kubernetes else "false",
-        "replicas": str(request.replicas),
     }
     _request(
         config,

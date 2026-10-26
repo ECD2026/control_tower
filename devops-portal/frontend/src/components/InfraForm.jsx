@@ -21,7 +21,6 @@ const INSTANCE_TYPES = [
 
 export const PACKAGE_OPTIONS = [
   { id: 'docker', label: 'Docker', icon: '🐳' },
-  { id: 'kubernetes', label: 'Kubernetes', icon: '☸️' },
   { id: 'nginx', label: 'Nginx', icon: '🌐' },
   { id: 'git', label: 'Git', icon: '📦' },
   { id: 'python3', label: 'Python 3', icon: '🐍' },
@@ -253,28 +252,6 @@ export default function InfraForm({
               onChange={e => set('docker_image', e.target.value)}
             />
           </div>
-
-          <div className="col-span-2">
-            <Toggle
-              on={formData.kubernetes}
-              onClick={() => set('kubernetes', !formData.kubernetes)}
-              title="Kubernetes Deployment"
-              description="Deploy using k3s lightweight Kubernetes"
-            />
-          </div>
-
-          {formData.kubernetes && (
-            <div>
-              <label className="label">Replicas</label>
-              <input
-                type="number"
-                className="input"
-                min={1} max={20}
-                value={formData.replicas}
-                onChange={e => set('replicas', parseInt(e.target.value) || 1)}
-              />
-            </div>
-          )}
         </div>
       </section>
 

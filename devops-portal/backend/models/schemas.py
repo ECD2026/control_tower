@@ -34,7 +34,7 @@ class DeploymentRequest(BaseModel):
         default="amazon_linux", description="OS type: amazon_linux or ubuntu"
     )
     packages: List[str] = Field(
-        default=[], description="Packages to install (docker, nginx, kubernetes, etc.)"
+        default=[], description="Packages to install (docker, nginx, etc.)"
     )
     custom_commands: str = Field(
         default="", description="Custom shell commands to run (one per line)"
@@ -42,10 +42,6 @@ class DeploymentRequest(BaseModel):
     docker_image: Optional[str] = Field(
         default="", description="Docker image to pull and run"
     )
-    kubernetes: bool = Field(
-        default=False, description="Whether to set up Kubernetes (k3s)"
-    )
-    replicas: int = Field(default=1, ge=1, le=20, description="Number of k8s replicas")
 
 
 class DeploymentResponse(BaseModel):

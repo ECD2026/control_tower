@@ -8,7 +8,7 @@ A full-stack web application for provisioning AWS infrastructure and configuring
 
 ## Project Overview
 
-Users fill out a form specifying infrastructure requirements (region, instance type, security groups), OS configuration (packages, custom commands), and deployment settings (Docker image, Kubernetes). The portal:
+Users fill out a form specifying infrastructure requirements (region, instance type, security groups), OS configuration (packages, custom commands), and deployment settings (Docker image). The portal:
 
 1. **Generates** Terraform HCL and Ansible YAML dynamically
 2. **Executes** `terraform init/plan/apply` with real-time log streaming
@@ -173,9 +173,7 @@ Generate a Terraform plan without applying.
   "os_type": "amazon_linux",
   "packages": ["docker", "nginx"],
   "custom_commands": "echo 'Setup complete'",
-  "docker_image": "",
-  "kubernetes": false,
-  "replicas": 1
+  "docker_image": ""
 }
 ```
 
@@ -275,8 +273,7 @@ Detailed deployment record with full config and logs.
   - Instance count via count meta-argument
 - `ansible_gen.py`: Builds YAML playbooks
   - Conditional package install (apt for Ubuntu, yum for Amazon Linux)
-  - Special handling for Docker, k3s, Nginx
-  - Inline Kubernetes deployment if k3s + docker_image
+  - Special handling for Docker, Nginx
 
 **SQLite Persistence:**
 - Lightweight, single-file database (no server needed)

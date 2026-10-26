@@ -17,8 +17,6 @@ export const DEFAULT_FORM = {
   packages: ['node_exporter'],
   custom_commands: '',
   docker_image: '',
-  kubernetes: false,
-  replicas: 1,
   detailed_monitoring: true,
 }
 

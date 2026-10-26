@@ -62,12 +62,6 @@ on:
       docker_image:
         type: string
         default: ""
-      kubernetes:
-        type: boolean
-        default: false
-      replicas:
-        type: string
-        default: "1"
       detailed_monitoring:
         description: Enable 1-minute CloudWatch metrics
         type: boolean
@@ -106,8 +100,6 @@ jobs:
       PACKAGES_JSON: ${{ inputs.packages_json }}
       CUSTOM_COMMANDS: ${{ inputs.custom_commands }}
       DOCKER_IMAGE: ${{ inputs.docker_image }}
-      KUBERNETES: ${{ inputs.kubernetes }}
-      REPLICAS: ${{ inputs.replicas }}
       DETAILED_MONITORING: ${{ inputs.detailed_monitoring }}
       DB_PATH: ${{ github.workspace }}/deployments.db
 

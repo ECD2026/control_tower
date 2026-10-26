@@ -44,7 +44,6 @@ Configuration: Ansible
 Cloud: AWS EC2
 Monitoring: Prometheus & Grafana
 Containerization: Docker
-Orchestration: Kubernetes 
 
 # Features
 1. Automated Deployment
@@ -68,9 +67,8 @@ Update systems without redeployment
 A multi-account CloudWatch exporter feeds Prometheus for every instance
 node_exporter adds memory and disk metrics when installed
 Grafana dashboards are embedded in the portal, behind its login
-6. Docker & Kubernetes Support
+6. Docker Support
 Supports containerized application deployment
-Optional Kubernetes orchestration for scaling and management
 
 # How It Works
 User signs in and uploads AWS access keys + an SSH key pair (verified with STS, encrypted at rest)

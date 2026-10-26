@@ -39,8 +39,6 @@ def _request_from_env() -> DeploymentRequest:
         "packages": json.loads(os.getenv("PACKAGES_JSON", "[]")),
         "custom_commands": os.getenv("CUSTOM_COMMANDS", ""),
         "docker_image": os.getenv("DOCKER_IMAGE", ""),
-        "kubernetes": os.getenv("KUBERNETES", "false").lower() == "true",
-        "replicas": int(os.getenv("REPLICAS", "1")),
         "detailed_monitoring": os.getenv("DETAILED_MONITORING", "true").lower() == "true",
     }
     return DeploymentRequest(**payload)
