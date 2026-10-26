@@ -1,3 +1,18 @@
+"""
+Runs a deployment on GitHub Actions instead of inside the backend.
+
+Flow:
+  1. Seal the user's AWS keys + SSH key pair with PORTAL_WORKFLOW_KEY
+     (services/crypto.py) and dispatch portal-deploy.yml with the sealed blob
+     as an input. Only the workflow, which has the same key as a repository
+     secret, can open it; plaintext secrets never appear in run inputs.
+  2. Find the run via its run-name (it embeds the deployment id), log step
+     transitions while it runs, then fetch the full job log.
+  3. On a successful deploy, look the new instances up in EC2 by their
+     PortalDeploymentId tag and record them, so they appear on the Instances
+     page and in Prometheus/Grafana. (The runner's own SQLite DB is ephemeral.)
+"""
+
 import asyncio
 import io
 import json
@@ -13,6 +28,7 @@ from typing import Any
 
 from models.schemas import DeploymentRequest
 
+from services.crypto import decrypt_secret, seal_for_workflow
 from services.execution_types import ExecutionResult, LogFn, MetadataFn
 
 
@@ -92,13 +108,35 @@ def _request_json(config: GitHubActionsConfig, path: str) -> dict[str, Any]:
     return json.loads(_request(config, path).decode("utf-8"))
 
 
+def _seal_credentials(credential: dict | None, request: DeploymentRequest) -> str:
+    """Encrypt everything secret the workflow needs into one opaque input."""
+    if not credential:
+        raise RuntimeError(
+            "GitHub Actions deployments need stored AWS credentials - add them "
+            "on the Credentials page."
+        )
+    return seal_for_workflow(
+        {
+            "aws_access_key_id": credential["access_key_id"],
+            "aws_secret_access_key": decrypt_secret(credential["secret_access_key_enc"]),
+            "ssh_private_key": decrypt_secret(credential.get("ssh_private_key_enc")) or "",
+            "ssh_public_key": request.ssh_public_key or "",
+        }
+    )
+
+
 def _dispatch(
     config: GitHubActionsConfig,
     deployment_id: str,
     request: DeploymentRequest,
     mode: str,
+    sealed_credentials: str,
 ) -> None:
+    # Keep this list in sync with the `inputs:` block of portal-deploy.yml.
     inputs = {
+        "credentials_blob": sealed_credentials,
+        "name": request.name or "",
+        "detailed_monitoring": "true" if request.detailed_monitoring else "false",
         "deploy_mode": mode,
         "deployment_id": deployment_id,
         "provider": request.provider,
@@ -196,13 +234,15 @@ async def run_github_actions_deployment(
     mode: str,
     log: LogFn,
     update_metadata: MetadataFn,
+    credential: dict | None = None,
 ) -> ExecutionResult:
     config = GitHubActionsConfig.from_env()
+    sealed = _seal_credentials(credential, request)
     await log(
         f"[{_ts()}] Dispatching workflow '{config.workflow}' on {config.repo} "
         f"for deployment {deployment_id}"
     )
-    await asyncio.to_thread(_dispatch, config, deployment_id, request, mode)
+    await asyncio.to_thread(_dispatch, config, deployment_id, request, mode, sealed)
 
     run = await _wait_for_run(config, deployment_id)
     run_id = int(run["id"])
@@ -226,6 +266,17 @@ async def run_github_actions_deployment(
         )
 
     await log(f"[{_ts()}] GitHub Actions run {run_id} completed successfully")
+
+    if mode == "deploy":
+        # Imported lazily to avoid a circular import at module load.
+        from services.aws_reconciler import sync_deployment_instances
+
+        found = await sync_deployment_instances(deployment_id, request, credential)
+        await log(
+            f"[{_ts()}] Registered {len(found)} instance(s) from EC2 tag "
+            f"PortalDeploymentId={deployment_id}"
+        )
+
     return ExecutionResult(
         status="success",
         execution_mode="github_actions",

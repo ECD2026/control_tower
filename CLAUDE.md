@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Aws_Organisational_Unit-Control-Tower** is an infrastructure-as-code (IaC) project for managing AWS organizational units and Control Tower configuration. The project uses Terraform as the primary infrastructure tool, with GitHub Actions for CI/CD automation. Docker and Jenkins support are scaffolded for future use.
+**Aws_Organisational_Unit-Control-Tower** is an infrastructure-as-code (IaC) project for managing AWS organizational units and Control Tower configuration. The project uses Terraform as the primary infrastructure tool, with GitHub Actions for CI/CD automation. The DevOps portal (`devops-portal/`) is documented in `docs/architecture.md`.
 
 **Current Status:** Sprint-1 focused on repository setup. Actual infrastructure code implementation is in progress.
 
@@ -17,7 +17,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **CI/CD**: GitHub Actions workflow (`.github/workflows/deploy.yml`) automatically deploys Terraform changes on push to `main`
 - **AWS Authentication**: GitHub Actions uses OpenID Connect (OIDC) for AWS credential assume role (arn:aws:iam::053020126202:role/GitHubTerraformRole), region: ap-south-1
 - **Docker** (`/docker/`): Container support (currently scaffolded)
-- **Jenkins** (`/jenkins/`): Jenkins pipeline support (currently scaffolded)
+- **DevOps portal** (`/devops-portal/`): React + FastAPI app that deploys EC2 via `.github/workflows/portal-deploy.yml` and is released by `portal-release.yml` (see `docs/architecture.md`)
 
 ## Git Workflow & Branching Strategy
 
@@ -76,7 +76,7 @@ Changes to `main` branch automatically trigger the GitHub Actions deployment wor
 
 ## File Structure Notes
 
-- Empty placeholder files currently exist in `/docker/`, `/jenkins/`, and `/terraform/modules/` and `/terraform/environments/` — populate these as implementation progresses
+- Empty placeholder files currently exist in `/docker/` and `/terraform/modules/` and `/terraform/environments/` — populate these as implementation progresses
 - `.terraform/` directories and lock files are gitignored (created locally during runs)
 - `.github/.github/` appears to be a duplicate directory structure (may warrant cleanup)
 

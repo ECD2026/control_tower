@@ -1,7 +1,13 @@
 name: Portal Deployment
 
-# Dispatched by the DevOps portal backend (services/github_actions_executor.py).
+# Dispatched by the DevOps portal backend (services/github_actions_executor.py)
+# whenever a user clicks Plan/Deploy with DEPLOYMENT_RUNNER_MODE=github_actions.
+#
 # run-name embeds the deployment id so the backend can find the run it triggered.
+#
+# Secrets: the user's AWS keys and SSH key pair arrive in `credentials_blob`,
+# Fernet-encrypted by the portal with PORTAL_WORKFLOW_KEY. The only repository
+# secret this workflow needs is that same PORTAL_WORKFLOW_KEY.
 run-name: portal-${{ inputs.deployment_id }} ${{ inputs.deploy_mode }}
 
 on:
@@ -16,6 +22,14 @@ on:
         description: Portal deployment identifier
         type: string
         required: true
+      credentials_blob:
+        description: Encrypted AWS keys + SSH key pair (sealed by the portal)
+        type: string
+        required: true
+      name:
+        description: Friendly name; instances are tagged Name=<name>-<n>
+        type: string
+        default: ""
       provider:
         type: string
         default: aws
@@ -29,7 +43,7 @@ on:
         type: string
         default: "1"
       key_pair_name:
-        description: Existing AWS key pair name
+        description: Logical key pair name (prefix of the per-deployment AWS key pair)
         type: string
         required: true
       security_group_ports_json:
@@ -54,12 +68,18 @@ on:
       replicas:
         type: string
         default: "1"
+      detailed_monitoring:
+        description: Enable 1-minute CloudWatch metrics
+        type: boolean
+        default: true
 
 permissions:
   contents: read
 
+# One group per deployment: different users' deployments run in parallel,
+# a single deployment is never run twice at once.
 concurrency:
-  group: portal-deploy
+  group: portal-deploy-${{ inputs.deployment_id }}
   cancel-in-progress: false
 
 jobs:
@@ -71,12 +91,11 @@ jobs:
       TF_IN_AUTOMATION: "true"
       PYTHONUNBUFFERED: "1"
       PYTHONUTF8: "1"
-      AWS_ACCESS_KEY_ID: ${{ secrets.PORTAL_AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.PORTAL_AWS_SECRET_ACCESS_KEY }}
       AWS_DEFAULT_REGION: ${{ inputs.region }}
       ANSIBLE_HOST_KEY_CHECKING: "False"
       DEPLOY_MODE: ${{ inputs.deploy_mode }}
       DEPLOYMENT_ID: ${{ inputs.deployment_id }}
+      DEPLOYMENT_NAME: ${{ inputs.name }}
       PROVIDER: ${{ inputs.provider }}
       REGION: ${{ inputs.region }}
       INSTANCE_TYPE: ${{ inputs.instance_type }}
@@ -89,6 +108,7 @@ jobs:
       DOCKER_IMAGE: ${{ inputs.docker_image }}
       KUBERNETES: ${{ inputs.kubernetes }}
       REPLICAS: ${{ inputs.replicas }}
+      DETAILED_MONITORING: ${{ inputs.detailed_monitoring }}
       DB_PATH: ${{ github.workspace }}/deployments.db
 
     steps:
@@ -122,16 +142,21 @@ jobs:
             exit 1
           fi
 
-      - name: Install SSH key
-        run: |
-          mkdir -p "$HOME/.ssh"
-          printf '%s\n' "${{ secrets.PORTAL_SSH_PRIVATE_KEY }}" > "$HOME/.ssh/${KEY_PAIR_NAME}.pem"
-          chmod 600 "$HOME/.ssh/${KEY_PAIR_NAME}.pem"
+      # Decrypts credentials_blob, masks every secret in the log, exports the
+      # AWS keys via $GITHUB_ENV and writes ~/.ssh/<key_pair_name>.pem.
+      - name: Open credential bundle
+        working-directory: devops-portal/backend
+        env:
+          PORTAL_CREDENTIALS_BLOB: ${{ inputs.credentials_blob }}
+          PORTAL_WORKFLOW_KEY: ${{ secrets.PORTAL_WORKFLOW_KEY }}
+        run: python scripts/open_workflow_bundle.py
 
       - name: Run portal deployment
         working-directory: devops-portal/backend
         run: python scripts/run_portal_deployment.py
 
+      # Generated files plus the Terraform state, so the security group and
+      # key pair of a deployment can be cleaned up with `terraform destroy`.
       - name: Archive generated files
         if: always()
         uses: actions/upload-artifact@v4
@@ -141,7 +166,9 @@ jobs:
             ${{ runner.temp }}/**/main.tf
             ${{ runner.temp }}/**/setup.yml
             ${{ runner.temp }}/**/inventory.ini
+            ${{ runner.temp }}/**/terraform.tfstate
           if-no-files-found: ignore
+          retention-days: 30
 
       - name: Remove SSH key
         if: always()

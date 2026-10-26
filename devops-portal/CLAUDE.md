@@ -1,5 +1,9 @@
 # DevOps Automation Portal
 
+> **Current architecture:** see [`docs/architecture.md`](../docs/architecture.md) — login and per-user
+> AWS credentials, GitHub Actions execution (`.github/workflows/portal-deploy.yml`), CloudWatch exporter →
+> Prometheus → Grafana, and AWS hosting (`infra/`). Sections below describe the original single-user design.
+
 A full-stack web application for provisioning AWS infrastructure and configuring servers automatically using Terraform and Ansible.
 
 ## Project Overview
