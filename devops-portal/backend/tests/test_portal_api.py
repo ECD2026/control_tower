@@ -175,6 +175,31 @@ def test_users_cannot_see_each_others_instances(client):
     assert client.post("/api/instances/i-alice/stop").status_code == 404
 
 
+def test_delete_history_is_per_user_and_keeps_running(client):
+    alice = _register(client, "alice@example.com")
+    from database.db import save_deployment, save_instance, update_deployment_status
+
+    for dep in ("done-1", "done-2", "live-1"):
+        save_deployment(dep, {"region": "ap-south-1"}, user_id=alice["id"])
+    update_deployment_status("done-1", "success")
+    update_deployment_status("done-2", "failed")
+    update_deployment_status("live-1", "running")
+    save_instance({"id": "i-alice", "deployment_id": "done-1", "region": "ap-south-1"})
+
+    client.post("/api/auth/logout")
+    _register(client, "bob@example.com")
+    assert client.delete("/api/history/done-1").status_code == 404
+    assert client.delete("/api/history").json() == {"deleted": 0}
+
+    client.post("/api/auth/logout")
+    client.post("/api/auth/login", json={"email": "alice@example.com", "password": "correct-horse"})
+    assert client.delete("/api/history/live-1").status_code == 409
+    assert client.delete("/api/history/done-1").json() == {"deleted": 1}
+    assert client.delete("/api/history").json() == {"deleted": 1}
+    assert [h["id"] for h in client.get("/api/history").json()] == ["live-1"]
+    assert [i["id"] for i in client.get("/api/instances").json()] == ["i-alice"]
+
+
 def test_terraform_naming_and_tags():
     from generators.terraform_gen import generate_terraform
     from models.schemas import DeploymentRequest

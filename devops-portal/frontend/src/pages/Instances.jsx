@@ -10,11 +10,11 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   RefreshCw, Loader2, Server, WifiOff, Rocket, Terminal, CheckCircle2, XCircle,
   Play, Pause, RotateCw, Trash2, Activity, Settings2, Info, ExternalLink, Cpu, ArrowDownUp,
-  ShieldCheck, MemoryStick, HardDrive,
+  ShieldCheck, MemoryStick, HardDrive, Download,
 } from 'lucide-react'
 import PageHeader from '../components/PageHeader'
 import LogsPanel from '../components/LogsPanel'
-import { PACKAGE_OPTIONS } from '../components/InfraForm'
+import { PACKAGE_OPTIONS, REGIONS } from '../components/InfraForm'
 import { api, openLogStream } from '../lib/api'
 
 const STATE_STYLE = {
@@ -286,6 +286,101 @@ function MonitoringTab({ instance }) {
   )
 }
 
+// ── Import existing instances ──────────────────────────────────────────────
+
+function ImportPanel({ onImported, onClose }) {
+  const [credentials, setCredentials] = useState([])
+  const [credentialId, setCredentialId] = useState('')
+  const [region, setRegion] = useState('ap-south-1')
+  const [sshUser, setSshUser] = useState('ec2-user')
+  const [found, setFound] = useState(null)
+  const [picked, setPicked] = useState(() => new Set())
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    api('/api/credentials').then(list => {
+      setCredentials(list)
+      if (list[0]) { setCredentialId(list[0].id); setRegion(list[0].default_region || 'ap-south-1') }
+    }).catch(() => {})
+  }, [])
+
+  const discover = async () => {
+    setBusy(true); setError(''); setFound(null); setPicked(new Set())
+    try {
+      setFound(await api(`/api/instances/discover?credential_id=${credentialId}&region=${region}`))
+    } catch (err) { setError(err.message) }
+    finally { setBusy(false) }
+  }
+
+  const doImport = async () => {
+    setBusy(true); setError('')
+    try {
+      await api('/api/instances/import', {
+        method: 'POST',
+        body: { credential_id: credentialId, region, instance_ids: [...picked], ssh_user: sshUser },
+      })
+      onImported()
+    } catch (err) { setError(err.message); setBusy(false) }
+  }
+
+  const toggle = (id) => setPicked(prev => {
+    const next = new Set(prev)
+    if (next.has(id)) next.delete(id); else next.add(id)
+    return next
+  })
+
+  return (
+    <div className="card p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-gray-200">Import existing EC2 instances</h3>
+        <button onClick={onClose} className="text-xs text-gray-500 hover:text-gray-300">Close</button>
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        <select className="input" value={credentialId} onChange={e => setCredentialId(e.target.value)}>
+          {credentials.length === 0 && <option value="">No credentials</option>}
+          {credentials.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+        <select className="input" value={region} onChange={e => setRegion(e.target.value)}>
+          {REGIONS.map(r => <option key={r}>{r}</option>)}
+        </select>
+        <select className="input" value={sshUser} onChange={e => setSshUser(e.target.value)}>
+          <option value="ec2-user">ec2-user (Amazon Linux)</option>
+          <option value="ubuntu">ubuntu</option>
+        </select>
+      </div>
+      <button onClick={discover} disabled={busy || !credentialId} className="btn-ghost text-xs py-1.5 px-3">
+        {busy && !found ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} Find instances
+      </button>
+      {found && (found.length === 0
+        ? <p className="text-xs text-gray-500">No unmanaged instances in {region}.</p>
+        : (
+          <div className="space-y-1">
+            {found.map(i => (
+              <label key={i.id} className="flex items-center gap-3 text-xs text-gray-300 px-1 py-1 rounded hover:bg-white/5">
+                <input type="checkbox" checked={picked.has(i.id)} onChange={() => toggle(i.id)} />
+                <span className="min-w-0 flex-1 truncate">{i.name || i.id}
+                  <span className="text-gray-500 font-mono"> · {i.id} · {i.instance_type} · {i.state}</span>
+                </span>
+                {!i.key_matches && (
+                  <span className="text-yellow-500 shrink-0" title={`Launched with key pair "${i.key_pair_name}"`}>
+                    key differs
+                  </span>
+                )}
+              </label>
+            ))}
+            <p className="hint">Ansible connects with the selected credential's SSH key. “key differs” instances
+              were launched with another key pair and will fail to connect.</p>
+            <button onClick={doImport} disabled={busy || picked.size === 0} className="btn-primary text-xs py-1.5 px-3">
+              {busy ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />} Import {picked.size || ''}
+            </button>
+          </div>
+        ))}
+      {error && <p className="text-xs text-red-400">{error}</p>}
+    </div>
+  )
+}
+
 // ── Page ───────────────────────────────────────────────────────────────────
 
 const TABS = [
@@ -301,6 +396,9 @@ export default function Instances({ params, navigate, onMenu }) {
   const [tab, setTab] = useState('overview')
   const [showTerminated, setShowTerminated] = useState(false)
   const [action, setAction] = useState({ status: 'idle', action: null, message: '' })
+  const [showImport, setShowImport] = useState(false)
+  const [checked, setChecked] = useState(() => new Set())
+  const [bulk, setBulk] = useState({ running: false, action: null, message: '', failed: false })
 
   const selectedId = params[0]
   const selected = instances.find(i => i.id === selectedId)
@@ -355,6 +453,47 @@ export default function Instances({ params, navigate, onMenu }) {
   const visible = instances.filter(i => showTerminated || i.state !== 'terminated')
   const hiddenCount = instances.length - visible.length
 
+  // Multi-select: bulk power actions reuse the per-instance endpoints.
+  const checkedInstances = visible.filter(i => checked.has(i.id))
+  const allChecked = visible.length > 0 && checkedInstances.length === visible.length
+  const eligible = (pred) => checkedInstances.filter(i => !TRANSITIONAL.has(i.state) && pred(i.state))
+  const bulkButtons = [
+    { id: 'start',  label: 'Resume',    icon: Play,     cls: 'btn-success', targets: eligible(s => s === 'stopped') },
+    { id: 'stop',   label: 'Pause',     icon: Pause,    cls: 'btn-ghost',   targets: eligible(s => s === 'running') },
+    { id: 'reboot', label: 'Restart',   icon: RotateCw, cls: 'btn-ghost',   targets: eligible(s => s === 'running') },
+    { id: 'delete', label: 'Terminate', icon: Trash2,   cls: 'btn-danger',  targets: eligible(s => s !== 'terminated') },
+  ]
+
+  const toggleChecked = (id) => setChecked(prev => {
+    const next = new Set(prev)
+    if (next.has(id)) next.delete(id); else next.add(id)
+    return next
+  })
+  const toggleAll = () => setChecked(allChecked ? new Set() : new Set(visible.map(i => i.id)))
+
+  const runBulk = async (id, targets) => {
+    if (id === 'delete' && !window.confirm(
+      `Terminate ${targets.length} instance${targets.length > 1 ? 's' : ''}? They and their data will be destroyed in AWS.`
+    )) return
+
+    setBulk({ running: true, action: id, message: '', failed: false })
+    const results = await Promise.allSettled(targets.map(inst =>
+      id === 'delete'
+        ? api(`/api/instances/${inst.id}`, { method: 'DELETE' })
+        : api(`/api/instances/${inst.id}/${id}`, { method: 'POST' })
+    ))
+    const failures = results.filter(r => r.status === 'rejected')
+    const ok = results.length - failures.length
+    setBulk({
+      running: false, action: id, failed: failures.length > 0,
+      message: failures.length
+        ? `${ok} succeeded, ${failures.length} failed: ${failures[0].reason?.message ?? 'error'}`
+        : `${ok} instance${ok > 1 ? 's' : ''} updated.`,
+    })
+    setChecked(new Set())
+    await fetchInstances()
+  }
+
   return (
     <>
       <PageHeader
@@ -363,6 +502,9 @@ export default function Instances({ params, navigate, onMenu }) {
         onMenu={onMenu}
         actions={
           <>
+            <button onClick={() => setShowImport(v => !v)} className="btn-ghost text-xs py-1 px-3">
+              <Download size={13} /> Import existing
+            </button>
             <button onClick={reconcile} disabled={syncing} className="btn-ghost text-xs py-1 px-3"
               title="Ask AWS for the current state of every instance">
               <RefreshCw size={13} className={syncing ? 'animate-spin' : ''} /> Sync with AWS
@@ -374,6 +516,10 @@ export default function Instances({ params, navigate, onMenu }) {
       <div className="p-4 sm:p-6 grid grid-cols-1 xl:grid-cols-5 gap-6">
         {/* List */}
         <div className="xl:col-span-2 flex flex-col gap-2">
+          {showImport && (
+            <ImportPanel onClose={() => setShowImport(false)}
+              onImported={() => { setShowImport(false); fetchInstances() }} />
+          )}
           {loading ? (
             <div className="card flex items-center justify-center h-40 text-gray-500">
               <Loader2 size={18} className="animate-spin" />
@@ -388,25 +534,58 @@ export default function Instances({ params, navigate, onMenu }) {
             </div>
           ) : (
             <div className="card p-1.5 space-y-1">
+              <div className="flex items-center gap-3 px-3 py-1.5 text-[11px] text-gray-500">
+                <input type="checkbox" aria-label="Select all instances"
+                  checked={allChecked}
+                  ref={el => { if (el) el.indeterminate = checked.size > 0 && !allChecked }}
+                  onChange={toggleAll} />
+                {checked.size > 0 ? `${checked.size} selected` : 'Select all'}
+              </div>
               {visible.map(inst => (
-                <button
+                <div
                   key={inst.id}
-                  onClick={() => navigate(`instances/${inst.id}`)}
-                  className={`w-full text-left px-3 py-2.5 rounded-lg flex items-center gap-3 transition-colors
+                  className={`flex items-center gap-3 pl-3 rounded-lg transition-colors
                     ${inst.id === selectedId ? 'bg-violet-500/10 ring-1 ring-violet-500/40' : 'hover:bg-white/5'}`}
                 >
-                  <div className="w-8 h-8 rounded-md bg-white/5 flex items-center justify-center shrink-0">
-                    <Server size={15} className="text-gray-400" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm text-gray-100 truncate">{inst.name || inst.id}</div>
-                    <div className="text-[11px] text-gray-500 font-mono truncate">
-                      {inst.id} · {inst.instance_type} · {inst.region}
+                  <input type="checkbox" aria-label={`Select ${inst.name || inst.id}`}
+                    checked={checked.has(inst.id)} onChange={() => toggleChecked(inst.id)} />
+                  <button
+                    onClick={() => navigate(`instances/${inst.id}`)}
+                    className="flex-1 min-w-0 text-left pr-3 py-2.5 flex items-center gap-3"
+                  >
+                    <div className="w-8 h-8 rounded-md bg-white/5 flex items-center justify-center shrink-0">
+                      <Server size={15} className="text-gray-400" />
                     </div>
-                  </div>
-                  <StateBadge state={inst.state} />
-                </button>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm text-gray-100 truncate">{inst.name || inst.id}</div>
+                      <div className="text-[11px] text-gray-500 font-mono truncate">
+                        {inst.id} · {inst.instance_type} · {inst.region}
+                      </div>
+                    </div>
+                    <StateBadge state={inst.state} />
+                  </button>
+                </div>
               ))}
+            </div>
+          )}
+          {checkedInstances.length > 0 && (
+            <div className="card p-3 space-y-2">
+              <div className="flex flex-wrap gap-2">
+                {bulkButtons.filter(b => b.targets.length > 0).map(({ id, label, icon: Icon, cls, targets }) => (
+                  <button key={id} onClick={() => runBulk(id, targets)} disabled={bulk.running}
+                    className={`${cls} text-xs py-1.5 px-3`}>
+                    {bulk.running && bulk.action === id
+                      ? <Loader2 size={13} className="animate-spin" />
+                      : <Icon size={13} />}
+                    {label} ({targets.length})
+                  </button>
+                ))}
+                <button onClick={() => setChecked(new Set())} disabled={bulk.running}
+                  className="text-xs text-gray-500 hover:text-gray-300 px-1">Clear</button>
+              </div>
+              {bulk.message && (
+                <p className={`text-xs ${bulk.failed ? 'text-red-400' : 'text-emerald-400'}`}>{bulk.message}</p>
+              )}
             </div>
           )}
           {hiddenCount > 0 && (

@@ -34,13 +34,20 @@ from database.db import (
     get_instance_configuration,
     list_instance_configurations,
     list_instances,
+    save_instance,
     save_instance_configuration,
     update_instance_configuration_status,
     update_instance_state,
 )
 from services.auth import get_current_user
 from services.aws_clients import session_for_credential
-from services.aws_reconciler import reconcile_instances, wait_for_stable_state
+from services.aws_reconciler import (
+    EC2_STATE_MAP,
+    _describe as _describe_ec2,
+    _tags_dict as _ec2_tags,
+    reconcile_instances,
+    wait_for_stable_state,
+)
 from services.instance_configurator import configure_instance
 from services.metrics_query import instance_snapshot
 from services.prometheus_targets import rewrite_targets
@@ -112,6 +119,96 @@ async def list_all_instances(
     user: dict = Depends(get_current_user),
 ):
     return [_serialize(row) for row in list_instances(state=state, user_id=user["id"])]
+
+
+# ---------- Import instances launched outside the portal ----------
+
+
+class ImportInstancesRequest(BaseModel):
+    credential_id: str
+    region: str
+    instance_ids: List[str] = Field(min_length=1)
+    ssh_user: str = "ec2-user"
+
+
+def _owned_credential(credential_id: str, user: dict) -> dict:
+    credential = get_credential(credential_id, user["id"])
+    if not credential:
+        raise HTTPException(status_code=404, detail="Credential not found")
+    return credential
+
+
+@router.get("/instances/discover")
+async def discover_instances(
+    credential_id: str,
+    region: str,
+    user: dict = Depends(get_current_user),
+):
+    """EC2 instances in `region` that the portal does not manage yet."""
+    credential = _owned_credential(credential_id, user)
+    try:
+        found = await asyncio.to_thread(
+            _describe_ec2, credential, region,
+            Filters=[{"Name": "instance-state-name", "Values": ["pending", "running", "stopped"]}],
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"AWS rejected the request: {exc}") from exc
+
+    known = {row["id"] for row in list_instances()}
+    return [
+        {
+            "id": ec2["InstanceId"],
+            "name": _ec2_tags(ec2).get("Name"),
+            "state": EC2_STATE_MAP.get(ec2.get("State", {}).get("Name", ""), "unknown"),
+            "instance_type": ec2.get("InstanceType"),
+            "public_ip": ec2.get("PublicIpAddress"),
+            "key_pair_name": ec2.get("KeyName"),
+            "key_matches": ec2.get("KeyName") == credential.get("key_pair_name"),
+        }
+        for ec2 in found
+        if ec2["InstanceId"] not in known
+    ]
+
+
+@router.post("/instances/import")
+async def import_instances(body: ImportInstancesRequest, user: dict = Depends(get_current_user)):
+    """Register existing EC2 instances so they can be managed and configured."""
+    credential = _owned_credential(body.credential_id, user)
+    if not credential.get("ssh_private_key_enc"):
+        raise HTTPException(
+            status_code=400,
+            detail="This credential has no SSH key pair - add one on the Credentials page.",
+        )
+    try:
+        found = await asyncio.to_thread(
+            _describe_ec2, credential, body.region, InstanceIds=body.instance_ids
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"AWS rejected the request: {exc}") from exc
+
+    imported = []
+    for ec2 in found:
+        if get_instance(ec2["InstanceId"]):
+            continue  # already managed (possibly by another user)
+        save_instance({
+            "id": ec2["InstanceId"],
+            "deployment_id": "imported",
+            "user_id": user["id"],
+            "credential_id": credential["id"],
+            "name": _ec2_tags(ec2).get("Name"),
+            "public_ip": ec2.get("PublicIpAddress"),
+            "private_ip": ec2.get("PrivateIpAddress"),
+            "ssh_user": body.ssh_user,
+            "key_pair_name": ec2.get("KeyName") or credential.get("key_pair_name"),
+            "os_type": "ubuntu" if body.ssh_user == "ubuntu" else "amazon_linux",
+            "region": body.region,
+            "instance_type": ec2.get("InstanceType"),
+            "state": EC2_STATE_MAP.get(ec2.get("State", {}).get("Name", ""), "unknown"),
+            "tags": _ec2_tags(ec2),
+        })
+        imported.append(ec2["InstanceId"])
+    rewrite_targets()
+    return {"imported": imported}
 
 
 @router.get("/instances/{instance_id}")

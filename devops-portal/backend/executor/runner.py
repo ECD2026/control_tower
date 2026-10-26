@@ -107,7 +107,10 @@ async def execute_command(
     # Force UTF-8 so Ansible doesn't fail on Windows-1252 locale
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
-    env["LC_ALL"] = "en_US.UTF-8"
+    # C.UTF-8 ships with glibc, so it exists in slim images and WSL where
+    # en_US.UTF-8 does not (Ansible refuses to start on an unsupported locale).
+    env["LC_ALL"] = "C.UTF-8"
+    env["LANG"] = "C.UTF-8"
     if extra_env:
         env.update(extra_env)
 

@@ -2,7 +2,7 @@
 // stored log underneath (or re-attaches to it if it is still running).
 
 import { useCallback, useEffect, useState } from 'react'
-import { ExternalLink, RefreshCw, Terminal } from 'lucide-react'
+import { ExternalLink, RefreshCw, Terminal, Trash2 } from 'lucide-react'
 import PageHeader from '../components/PageHeader'
 import DeploymentHistory from '../components/DeploymentHistory'
 import LogsPanel from '../components/LogsPanel'
@@ -26,6 +26,24 @@ export default function Deployments({ params, navigate, onMenu }) {
 
   useEffect(() => { load() }, [load])
 
+  const remove = async (row) => {
+    if (!window.confirm(`Delete "${row.name || row.id.slice(0, 8)}" from your deployment history?`)) return
+    try {
+      await api(`/api/history/${row.id}`, { method: 'DELETE' })
+      if (row.id === selectedId) navigate('deployments')
+      load()
+    } catch (err) { window.alert(err.message) }
+  }
+
+  const clearAll = async () => {
+    if (!window.confirm('Delete all finished deployments from your history? Running ones are kept. Instances are not affected.')) return
+    try {
+      await api('/api/history', { method: 'DELETE' })
+      if (selectedId) navigate('deployments')
+      load()
+    } catch (err) { window.alert(err.message) }
+  }
+
   // The stream endpoint replays stored logs for finished runs and follows
   // live ones, so one code path covers both.
   useEffect(() => {
@@ -47,9 +65,14 @@ export default function Deployments({ params, navigate, onMenu }) {
         description="Every plan and deploy run, newest first"
         onMenu={onMenu}
         actions={
-          <button onClick={load} disabled={loading} className="btn-ghost text-xs py-1 px-3">
-            <RefreshCw size={13} className={loading ? 'animate-spin' : ''} /> Refresh
-          </button>
+          <div className="flex gap-2">
+            <button onClick={clearAll} disabled={loading || history.length === 0} className="btn-ghost text-xs py-1 px-3">
+              <Trash2 size={13} /> Clear history
+            </button>
+            <button onClick={load} disabled={loading} className="btn-ghost text-xs py-1 px-3">
+              <RefreshCw size={13} className={loading ? 'animate-spin' : ''} /> Refresh
+            </button>
+          </div>
         }
       />
       <div className="p-4 sm:p-6 space-y-6">
@@ -58,6 +81,7 @@ export default function Deployments({ params, navigate, onMenu }) {
           loading={loading}
           selectedId={selectedId}
           onSelect={row => navigate(`deployments/${row.id}`)}
+          onDelete={remove}
         />
 
         {selected && (

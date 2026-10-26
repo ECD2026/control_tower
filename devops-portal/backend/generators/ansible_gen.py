@@ -107,9 +107,9 @@ def _build_package_tasks(
       changed_when: false
 
     - name: Install Nginx
-      yum:
-        name: nginx
-        state: present
+      shell: yum install -y nginx
+      args:
+        executable: /bin/bash
 
     - name: Start and enable Nginx
       service:
@@ -118,20 +118,26 @@ def _build_package_tasks(
         enabled: yes""")
 
         elif pkg_lower == "git":
-            tasks.append(f"""\
+            if is_ubuntu:
+                tasks.append("""\
     - name: Install Git
-      {pkg_mgr}:
+      apt:
         name: git
         state: present""")
+            else:
+                tasks.append(_yum_install_task("Install Git", ["git"]))
 
         elif pkg_lower in ("python3", "python"):
-            tasks.append(f"""\
+            if is_ubuntu:
+                tasks.append("""\
     - name: Install Python3 and pip
-      {pkg_mgr}:
+      apt:
         name:
           - python3
           - python3-pip
         state: present""")
+            else:
+                tasks.append(_yum_install_task("Install Python3 and pip", ["python3", "python3-pip"]))
 
         elif pkg_lower == "nodejs":
             if is_ubuntu:
@@ -227,11 +233,14 @@ def _build_package_tasks(
         executable: /bin/bash""")
 
         else:
-            tasks.append(f"""\
+            if is_ubuntu:
+                tasks.append(f"""\
     - name: Install {pkg}
-      {pkg_mgr}:
+      apt:
         name: {pkg_lower}
         state: present""")
+            else:
+                tasks.append(_yum_install_task(f"Install {pkg}", [pkg_lower]))
     return tasks
 
 
@@ -263,12 +272,31 @@ def _build_system_update_task(is_ubuntu: bool) -> str:
       changed_when: false
 
     - name: Update yum cache
-      yum:
-        update_cache: yes
+      shell: yum makecache -y
+      args:
+        executable: /bin/bash
       register: yum_cache_update
       retries: 5
       delay: 20
-      until: yum_cache_update is succeeded"""
+      until: yum_cache_update is succeeded
+      changed_when: false"""
+
+
+def _yum_install_task(title: str, packages: List[str]) -> str:
+    """
+    Install packages on Amazon Linux through the yum CLI. The `yum` module is
+    unusable there: Amazon Linux 2 ships yum without Python 3 bindings, so
+    ansible-core >= 2.17 fails with "Could not detect which major revision of dnf".
+    """
+    return f"""\
+    - name: {title}
+      shell: yum install -y {" ".join(packages)}
+      args:
+        executable: /bin/bash
+      register: yum_install
+      retries: 5
+      delay: 20
+      until: yum_install is succeeded"""
 
 
 def _build_custom_command_tasks(

@@ -364,6 +364,22 @@ def get_deployment(deployment_id: str, user_id: Optional[str] = None) -> Optiona
     return dict(row) if row else None
 
 
+def delete_deployments(user_id: str, deployment_id: Optional[str] = None) -> int:
+    """
+    Delete a user's finished deployment records (one, or all when
+    `deployment_id` is None). Pending/running ones are kept so a live run
+    keeps its log. Instances are separate rows and are not touched.
+    Returns the number of rows deleted.
+    """
+    query = "DELETE FROM deployments WHERE user_id=? AND status NOT IN ('pending', 'running')"
+    params: list = [user_id]
+    if deployment_id is not None:
+        query += " AND id=?"
+        params.append(deployment_id)
+    with _conn() as con:
+        return con.execute(query, params).rowcount
+
+
 # ---------- Instances ----------
 
 

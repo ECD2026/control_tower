@@ -24,7 +24,10 @@ from services.execution_types import LogFn
 
 SSH_CONNECT_TIMEOUT_SECONDS = 5
 SSH_WAIT_INTERVAL_SECONDS = 5
-SSH_WAIT_TIMEOUT_SECONDS = 300
+# A freshly launched instance can take several minutes to accept SSH, so
+# configuring right after a deployment needs a generous window.
+SSH_WAIT_TIMEOUT_SECONDS = int(os.getenv("SSH_WAIT_TIMEOUT_SECONDS", "900"))
+ANSIBLE_CONNECT_TIMEOUT_SECONDS = 30
 
 SSH_KEY_DIR_ENV = os.getenv("SSH_KEY_DIR")
 DEFAULT_SSH_KEY_DIR = (
@@ -205,7 +208,11 @@ async def _run_playbook(
             "-i", inventory_path,
             playbook_path,
             "--ssh-extra-args=-o StrictHostKeyChecking=no",
+            "--timeout", str(ANSIBLE_CONNECT_TIMEOUT_SECONDS),
         ],
         work_dir,
+        # yum/apt hold a lock while cloud-init or unattended upgrades run on a
+        # new instance; retry the SSH connection and wait for the lock.
+        extra_env={"ANSIBLE_SSH_RETRIES": "5"},
     ):
         await log(f"[ANSIBLE] {line}")
