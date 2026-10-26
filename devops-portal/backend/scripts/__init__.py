@@ -1,3 +1,3 @@
 """
-Command-line helpers for Jenkins and local automation flows.
+Command-line helpers for GitHub Actions and local automation flows.
 """

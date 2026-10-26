@@ -1,0 +1,148 @@
+name: Portal Deployment
+
+# Dispatched by the DevOps portal backend (services/github_actions_executor.py).
+# run-name embeds the deployment id so the backend can find the run it triggered.
+run-name: portal-${{ inputs.deployment_id }} ${{ inputs.deploy_mode }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploy_mode:
+        description: Run plan-only or full deploy
+        type: choice
+        options: [plan, deploy]
+        default: plan
+      deployment_id:
+        description: Portal deployment identifier
+        type: string
+        required: true
+      provider:
+        type: string
+        default: aws
+      region:
+        type: string
+        default: us-east-1
+      instance_type:
+        type: string
+        default: t2.micro
+      instance_count:
+        type: string
+        default: "1"
+      key_pair_name:
+        description: Existing AWS key pair name
+        type: string
+        required: true
+      security_group_ports_json:
+        type: string
+        default: "[22, 80, 443]"
+      os_type:
+        type: choice
+        options: [amazon_linux, ubuntu]
+        default: amazon_linux
+      packages_json:
+        type: string
+        default: "[]"
+      custom_commands:
+        type: string
+        default: ""
+      docker_image:
+        type: string
+        default: ""
+      kubernetes:
+        type: boolean
+        default: false
+      replicas:
+        type: string
+        default: "1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portal-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: ${{ inputs.deploy_mode }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      TF_IN_AUTOMATION: "true"
+      PYTHONUNBUFFERED: "1"
+      PYTHONUTF8: "1"
+      AWS_ACCESS_KEY_ID: ${{ secrets.PORTAL_AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.PORTAL_AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: ${{ inputs.region }}
+      ANSIBLE_HOST_KEY_CHECKING: "False"
+      DEPLOY_MODE: ${{ inputs.deploy_mode }}
+      DEPLOYMENT_ID: ${{ inputs.deployment_id }}
+      PROVIDER: ${{ inputs.provider }}
+      REGION: ${{ inputs.region }}
+      INSTANCE_TYPE: ${{ inputs.instance_type }}
+      INSTANCE_COUNT: ${{ inputs.instance_count }}
+      KEY_PAIR_NAME: ${{ inputs.key_pair_name }}
+      SECURITY_GROUP_PORTS_JSON: ${{ inputs.security_group_ports_json }}
+      OS_TYPE: ${{ inputs.os_type }}
+      PACKAGES_JSON: ${{ inputs.packages_json }}
+      CUSTOM_COMMANDS: ${{ inputs.custom_commands }}
+      DOCKER_IMAGE: ${{ inputs.docker_image }}
+      KUBERNETES: ${{ inputs.kubernetes }}
+      REPLICAS: ${{ inputs.replicas }}
+      DB_PATH: ${{ github.workspace }}/deployments.db
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.8.5
+          terraform_wrapper: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: devops-portal/backend/requirements.txt
+
+      - name: Install dependencies
+        working-directory: devops-portal/backend
+        run: pip install -r requirements.txt ansible
+
+      - name: Point temp dir at runner temp
+        run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
+
+      - name: Validate inputs
+        run: |
+          if [ -z "${KEY_PAIR_NAME// }" ]; then
+            echo "KEY_PAIR_NAME is required." >&2
+            exit 1
+          fi
+
+      - name: Install SSH key
+        run: |
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "${{ secrets.PORTAL_SSH_PRIVATE_KEY }}" > "$HOME/.ssh/${KEY_PAIR_NAME}.pem"
+          chmod 600 "$HOME/.ssh/${KEY_PAIR_NAME}.pem"
+
+      - name: Run portal deployment
+        working-directory: devops-portal/backend
+        run: python scripts/run_portal_deployment.py
+
+      - name: Archive generated files
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: portal-${{ inputs.deployment_id }}
+          path: |
+            ${{ runner.temp }}/**/main.tf
+            ${{ runner.temp }}/**/setup.yml
+            ${{ runner.temp }}/**/inventory.ini
+          if-no-files-found: ignore
+
+      - name: Remove SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/${KEY_PAIR_NAME}.pem"

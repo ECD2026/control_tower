@@ -25,6 +25,9 @@ Must be running before you trigger any Jenkins build.
 
 ```powershell
 
+# Ensure WSL has the SSH key with strict permissions (run once; safe to repeat)
+# NOTE: run these in PowerShell, not inside a WSL shell — the `wsl` prefix is required
+wsl mkdir -p /home/asus/.ssh
 wsl cp /mnt/c/Users/Asus/.ssh/automatic.pem /home/asus/.ssh/automatic.pem
 wsl chmod 600 /home/asus/.ssh/automatic.pem
 wsl chown asus:asus /home/asus/.ssh/automatic.pem
@@ -165,5 +168,7 @@ Jenkins itself keeps running as a Windows service — no action needed.
 | `terraform: command not found` in Jenkins | Terraform checked inside WSL | Expected — Terraform runs natively on Windows via `runner.py`, not in WSL |
 | `ansible: command not found` in Jenkins | Ansible not in WSL | `wsl -- bash -lc "sudo apt install -y ansible"` |
 | SSH timeout during Ansible | PEM not in WSL `~/.ssh` | Pipeline copies it automatically; check Jenkins build logs for copy errors |
+| `WARNING: UNPROTECTED PRIVATE KEY FILE` in SSH logs | Key on NTFS (`/mnt/c/...`) — `chmod` has no effect there | Run the four `wsl` commands at the top of Terminal 1 to copy the key into the WSL Linux filesystem and set `600` permissions |
+| `mkdir` / `cp` / `chmod` not recognised | Commands were run in PowerShell instead of WSL | Prefix each command with `wsl` (e.g. `wsl mkdir -p /home/asus/.ssh`) or open a WSL shell first with `wsl` |
 | `[TIMEOUT] No activity` in portal UI | Old backend still running | Restart `uvicorn` — the keepalive fix requires the new code |
 | Instance not in Instances tab | Deploy ran before Phase 2 | Use the backfill SQL in `docs/post-phase-2-configuration.md` §5 |

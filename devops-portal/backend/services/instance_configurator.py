@@ -30,6 +30,7 @@ DEFAULT_SSH_KEY_DIR = (
     os.path.expanduser(SSH_KEY_DIR_ENV)
     if SSH_KEY_DIR_ENV
     else (
+        # WSL Linux filesystem — chmod 600 works here unlike /mnt/c/... (NTFS)
         "/home/asus/.ssh"
         if sys.platform == "win32"
         else os.path.expanduser("~/.ssh")

@@ -41,7 +41,7 @@ async def main() -> int:
     mode = os.getenv("DEPLOY_MODE", "plan").strip().lower()
     deployment_id = os.getenv("DEPLOYMENT_ID") or None
     request = _request_from_env()
-    work_dir = tempfile.mkdtemp(prefix="jenkins_portal_")
+    work_dir = tempfile.mkdtemp(prefix="portal_")
     await run_local_deployment(request, work_dir, mode, _log_to_stdout, deployment_id=deployment_id)
     return 0
 

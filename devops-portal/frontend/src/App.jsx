@@ -196,7 +196,7 @@ export default function App() {
                       className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300"
                     >
                       <ExternalLink size={12} />
-                      Jenkins
+                      View run
                     </a>
                   )}
                 </div>
