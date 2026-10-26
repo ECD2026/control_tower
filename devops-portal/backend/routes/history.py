@@ -2,12 +2,14 @@
 Deployment history routes (scoped to the logged-in user):
   GET /api/history        - 50 most recent deployments
   GET /api/history/{id}   - full record with config and logs
+  DELETE /api/history/{id} - delete one finished deployment record
+  DELETE /api/history      - delete all of the user's finished records
 """
 
 import json
 from fastapi import APIRouter, Depends, HTTPException
 
-from database.db import get_all_deployments, get_deployment
+from database.db import delete_deployments, get_all_deployments, get_deployment
 from services.auth import get_current_user
 
 router = APIRouter()
@@ -49,3 +51,19 @@ async def get_deployment_detail(deployment_id: str, user: dict = Depends(get_cur
     rec["config"].pop("ssh_public_key", None)
     rec["logs"] = json.loads(rec.get("logs") or "[]")
     return rec
+
+
+@router.delete("/history")
+async def clear_history(user: dict = Depends(get_current_user)):
+    return {"deleted": delete_deployments(user["id"])}
+
+
+@router.delete("/history/{deployment_id}")
+async def delete_deployment_record(deployment_id: str, user: dict = Depends(get_current_user)):
+    rec = get_deployment(deployment_id, user["id"])
+    if not rec:
+        raise HTTPException(status_code=404, detail="Deployment not found")
+    if rec["status"] in ("pending", "running"):
+        raise HTTPException(status_code=409, detail="Deployment is still in progress")
+    delete_deployments(user["id"], deployment_id)
+    return {"deleted": 1}

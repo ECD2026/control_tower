@@ -1,7 +1,7 @@
 // Table of past deployments. Rows are clickable; the parent decides what
 // selecting one does (the Deployments page shows its log).
 
-import { ExternalLink, Clock, Loader2 } from 'lucide-react'
+import { ExternalLink, Clock, Loader2, Trash2 } from 'lucide-react'
 import StatusBadge from './StatusBadge'
 
 function fmtDate(iso) {
@@ -12,7 +12,7 @@ function fmtDate(iso) {
   })
 }
 
-export default function DeploymentHistory({ history = [], loading = false, onSelect, selectedId }) {
+export default function DeploymentHistory({ history = [], loading = false, onSelect, onDelete, selectedId }) {
   if (loading && history.length === 0) {
     return (
       <div className="card flex items-center justify-center h-40 text-gray-500">
@@ -81,6 +81,15 @@ export default function DeploymentHistory({ history = [], loading = false, onSel
                   >
                     <ExternalLink size={13} />
                   </a>
+                )}
+                {onDelete && !['pending', 'running'].includes(row.status) && (
+                  <button
+                    onClick={e => { e.stopPropagation(); onDelete(row) }}
+                    className="text-gray-500 hover:text-red-400 inline-flex p-1"
+                    title="Delete from history"
+                  >
+                    <Trash2 size={13} />
+                  </button>
                 )}
               </td>
             </tr>

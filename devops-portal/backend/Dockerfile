@@ -2,6 +2,8 @@
 # docker-compose (same code, different command).
 FROM python:3.12-slim
 
+ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
+
 # Terraform (pinned) + OpenSSH client for Ansible's SSH connections.
 ARG TERRAFORM_VERSION=1.8.5
 RUN apt-get update && \
