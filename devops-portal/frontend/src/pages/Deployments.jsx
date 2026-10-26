@@ -6,6 +6,7 @@ import { ExternalLink, RefreshCw, Terminal, Trash2 } from 'lucide-react'
 import PageHeader from '../components/PageHeader'
 import DeploymentHistory from '../components/DeploymentHistory'
 import LogsPanel from '../components/LogsPanel'
+import { useDialog } from '../components/ConfirmDialog'
 import { api, openLogStream } from '../lib/api'
 
 export default function Deployments({ params, navigate, onMenu }) {
@@ -13,6 +14,7 @@ export default function Deployments({ params, navigate, onMenu }) {
   const [loading, setLoading] = useState(true)
   const [logs, setLogs] = useState([])
   const [logStatus, setLogStatus] = useState('idle')
+  const [ask, dialog] = useDialog()
 
   const selectedId = params[0]
   const selected = history.find(h => h.id === selectedId)
@@ -27,21 +29,31 @@ export default function Deployments({ params, navigate, onMenu }) {
   useEffect(() => { load() }, [load])
 
   const remove = async (row) => {
-    if (!window.confirm(`Delete "${row.name || row.id.slice(0, 8)}" from your deployment history?`)) return
+    if (!await ask.confirm({
+      title: 'Delete deployment record?',
+      message: `"${row.name || row.id.slice(0, 8)}" will be removed from your deployment history.`,
+      confirmLabel: 'Delete',
+      danger: true,
+    })) return
     try {
       await api(`/api/history/${row.id}`, { method: 'DELETE' })
       if (row.id === selectedId) navigate('deployments')
       load()
-    } catch (err) { window.alert(err.message) }
+    } catch (err) { ask.notify({ title: 'Delete failed', message: err.message }) }
   }
 
   const clearAll = async () => {
-    if (!window.confirm('Delete all finished deployments from your history? Running ones are kept. Instances are not affected.')) return
+    if (!await ask.confirm({
+      title: 'Clear deployment history?',
+      message: 'All finished deployments will be removed from your history. Running ones are kept and instances are not affected.',
+      confirmLabel: 'Clear history',
+      danger: true,
+    })) return
     try {
       await api('/api/history', { method: 'DELETE' })
       if (selectedId) navigate('deployments')
       load()
-    } catch (err) { window.alert(err.message) }
+    } catch (err) { ask.notify({ title: 'Clear failed', message: err.message }) }
   }
 
   // The stream endpoint replays stored logs for finished runs and follows
@@ -60,6 +72,7 @@ export default function Deployments({ params, navigate, onMenu }) {
 
   return (
     <>
+      {dialog}
       <PageHeader
         title="Deployments"
         description="Every plan and deploy run, newest first"

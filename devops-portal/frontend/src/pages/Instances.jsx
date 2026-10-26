@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import PageHeader from '../components/PageHeader'
 import LogsPanel from '../components/LogsPanel'
+import { useDialog } from '../components/ConfirmDialog'
 import { PACKAGE_OPTIONS, REGIONS } from '../components/InfraForm'
 import { api, openLogStream } from '../lib/api'
 
@@ -399,6 +400,7 @@ export default function Instances({ params, navigate, onMenu }) {
   const [showImport, setShowImport] = useState(false)
   const [checked, setChecked] = useState(() => new Set())
   const [bulk, setBulk] = useState({ running: false, action: null, message: '', failed: false })
+  const [ask, dialog] = useDialog()
 
   const selectedId = params[0]
   const selected = instances.find(i => i.id === selectedId)
@@ -433,9 +435,12 @@ export default function Instances({ params, navigate, onMenu }) {
 
   const runAction = async (id) => {
     if (!selected) return
-    if (id === 'delete' && !window.confirm(
-      `Terminate ${selected.name || selected.id}? The instance and its data will be destroyed in AWS.`
-    )) return
+    if (id === 'delete' && !await ask.confirm({
+      title: 'Terminate instance?',
+      message: `${selected.name || selected.id} and its data will be destroyed in AWS. This cannot be undone.`,
+      confirmLabel: 'Terminate',
+      danger: true,
+    })) return
 
     setAction({ status: 'running', action: id, message: '' })
     try {
@@ -472,9 +477,12 @@ export default function Instances({ params, navigate, onMenu }) {
   const toggleAll = () => setChecked(allChecked ? new Set() : new Set(visible.map(i => i.id)))
 
   const runBulk = async (id, targets) => {
-    if (id === 'delete' && !window.confirm(
-      `Terminate ${targets.length} instance${targets.length > 1 ? 's' : ''}? They and their data will be destroyed in AWS.`
-    )) return
+    if (id === 'delete' && !await ask.confirm({
+      title: `Terminate ${targets.length} instance${targets.length > 1 ? 's' : ''}?`,
+      message: `${targets.length > 1 ? 'They and their data' : 'It and its data'} will be destroyed in AWS. This cannot be undone.`,
+      confirmLabel: 'Terminate',
+      danger: true,
+    })) return
 
     setBulk({ running: true, action: id, message: '', failed: false })
     const results = await Promise.allSettled(targets.map(inst =>
@@ -496,6 +504,7 @@ export default function Instances({ params, navigate, onMenu }) {
 
   return (
     <>
+      {dialog}
       <PageHeader
         title={selected ? selected.name || selected.id : 'Instances'}
         description={selected ? `${selected.id} · ${selected.region}` : 'EC2 instances deployed from this portal'}
