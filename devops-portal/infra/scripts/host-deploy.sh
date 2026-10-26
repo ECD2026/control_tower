@@ -34,6 +34,13 @@ if [ "$WAIT_FOR_SECRETS" = "--wait-for-secrets" ]; then
     sleep 15
   done
 fi
+for required in encryption_key jwt_secret workflow_key github_token; do
+  if ! param "$required" >/dev/null; then
+    echo "Missing $SSM_PREFIX/$required - run infra/scripts/bootstrap-secrets.sh," >&2
+    echo "then re-run: /opt/devops-portal/bin/host-deploy.sh $REF" >&2
+    exit 1
+  fi
+done
 
 echo "==> Fetching $GITHUB_REPO @ $REF"
 if [ ! -d "$SRC/.git" ]; then
