@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { Terminal, CheckCircle2, XCircle, Clock } from 'lucide-react'
+import { Terminal, CheckCircle2, XCircle } from 'lucide-react'
 
 function classifyLine(line) {
   if (line.startsWith('[ERROR]'))    return 'log-error'
@@ -8,21 +8,25 @@ function classifyLine(line) {
                                      return 'log-success'
   if (line.startsWith('[TERRAFORM]'))return 'log-tf'
   if (line.startsWith('[ANSIBLE]'))  return 'log-ansible'
+  if (line.startsWith('[GITHUB]'))   return 'log-github'
   if (line.startsWith('[INFO]'))     return 'log-info'
   return 'log-default'
 }
 
-export default function LogsPanel({ logs = [], status = 'idle' }) {
-  const bottomRef = useRef(null)
+export default function LogsPanel({ logs = [], status = 'idle', minHeight = 'min-h-[520px]' }) {
+  const bodyRef = useRef(null)
 
+  // Follow new lines by scrolling the log box itself - scrollIntoView would
+  // also scroll the whole page and yank the user away from the form.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    const el = bodyRef.current
+    if (el) el.scrollTop = el.scrollHeight
   }, [logs])
 
   const isEmpty = logs.length === 0
 
   return (
-    <div className="card flex flex-col min-h-[520px] max-h-[680px]">
+    <div className={`card flex flex-col ${minHeight} max-h-[680px]`}>
       {/* Terminal header bar */}
       <div className="flex items-center gap-2 mb-3 pb-3 border-b border-gray-800">
         <div className="flex gap-1.5">
@@ -39,7 +43,7 @@ export default function LogsPanel({ logs = [], status = 'idle' }) {
       </div>
 
       {/* Log body */}
-      <div className="flex-1 overflow-y-auto font-mono text-xs leading-5 space-y-0.5">
+      <div ref={bodyRef} className="flex-1 overflow-y-auto font-mono text-xs leading-5 space-y-0.5">
         {isEmpty ? (
           <div className="h-full flex flex-col items-center justify-center gap-3 text-gray-700">
             <Terminal size={32} />
@@ -74,7 +78,6 @@ export default function LogsPanel({ logs = [], status = 'idle' }) {
             )}
           </>
         )}
-        <div ref={bottomRef} />
       </div>
     </div>
   )

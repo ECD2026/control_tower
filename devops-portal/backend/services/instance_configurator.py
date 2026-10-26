@@ -17,6 +17,7 @@ from database.db import get_instance, update_instance_tags
 from executor.runner import execute_command
 from generators.ansible_gen import generate_ansible_for_host
 from services.prometheus_targets import rewrite_targets
+from services.ssh_keys import private_key_file
 
 from services.execution_types import LogFn
 
@@ -110,10 +111,14 @@ async def configure_instance(
     packages: List[str],
     custom_commands: str,
     log: LogFn,
+    credential: dict | None = None,
 ) -> None:
     """
     Generate a single-host playbook for `instance`, wait for SSH, then run
     Ansible. All progress is streamed through `log`. Raises on any failure.
+
+    The SSH key comes from the instance's stored credential; instances created
+    before credentials existed fall back to SSH_KEY_DIR/<key_pair_name>.pem.
     """
     instance_id = instance.get("id")
     public_ip = instance.get("public_ip")
@@ -132,10 +137,47 @@ async def configure_instance(
             f"locate SSH key."
         )
 
-    ssh_key_path = f"{DEFAULT_SSH_KEY_DIR}/{key_pair_name}.pem"
-
     work_dir = tempfile.mkdtemp(prefix=f"instance_cfg_{instance_id[:8]}_")
     await log(f"[{_ts()}] Work directory: {work_dir}")
+
+    with private_key_file(credential, work_dir) as stored_key_path:
+        ssh_key_path = stored_key_path or f"{DEFAULT_SSH_KEY_DIR}/{key_pair_name}.pem"
+        await _run_playbook(
+            instance, packages, custom_commands, public_ip, ssh_user,
+            ssh_key_path, work_dir, log,
+        )
+
+    if "node_exporter" in [pkg.lower() for pkg in packages]:
+        current = get_instance(instance_id) or {}
+        current_tags = current.get("tags") or instance.get("tags") or {}
+        if not isinstance(current_tags, dict):
+            import json
+            try:
+                current_tags = json.loads(current_tags or "{}")
+            except (TypeError, ValueError):
+                current_tags = {}
+        if not isinstance(current_tags, dict):
+            current_tags = {}
+        current_tags["monitoring"] = "enabled"
+        update_instance_tags(instance_id, current_tags)
+        rewrite_targets()
+        await log(f"[{_ts()}] Monitoring enabled for {instance_id}")
+
+    await log(f"[{_ts()}] Configuration completed successfully on {instance_id}")
+
+
+async def _run_playbook(
+    instance: dict,
+    packages: List[str],
+    custom_commands: str,
+    public_ip: str,
+    ssh_user: str,
+    ssh_key_path: str,
+    work_dir: str,
+    log: LogFn,
+) -> None:
+    """Write playbook + inventory, wait for SSH and run Ansible."""
+    instance_id = instance.get("id")
 
     playbook_path = os.path.join(work_dir, "setup.yml")
     with open(playbook_path, "w", encoding="utf-8") as fh:
@@ -167,21 +209,3 @@ async def configure_instance(
         work_dir,
     ):
         await log(f"[ANSIBLE] {line}")
-
-    if "node_exporter" in [pkg.lower() for pkg in packages]:
-        current = get_instance(instance_id) or {}
-        current_tags = current.get("tags") or instance.get("tags") or {}
-        if not isinstance(current_tags, dict):
-            import json
-            try:
-                current_tags = json.loads(current_tags or "{}")
-            except (TypeError, ValueError):
-                current_tags = {}
-        if not isinstance(current_tags, dict):
-            current_tags = {}
-        current_tags["monitoring"] = "enabled"
-        update_instance_tags(instance_id, current_tags)
-        rewrite_targets()
-        await log(f"[{_ts()}] Monitoring enabled for {instance_id}")
-
-    await log(f"[{_ts()}] Configuration completed successfully on {instance_id}")

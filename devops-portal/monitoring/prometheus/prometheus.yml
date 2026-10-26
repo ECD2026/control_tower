@@ -1,7 +1,30 @@
+# Prometheus for the DevOps portal.
+#
+# Two sources of instance metrics:
+#   cloudwatch - the portal's multi-account CloudWatch exporter
+#                (backend/exporters/cloudwatch_exporter.py). Covers every
+#                portal-managed instance with no agent and no inbound ports.
+#   node       - node_exporter on instances where it was installed; targets
+#                are written by the backend to targets/instances.json.
+# Both expose an `instance_id` label so dashboards can join them.
+
 global:
   scrape_interval: 30s
+  evaluation_interval: 30s
+  external_labels:
+    portal: devops-portal
 
 scrape_configs:
+  - job_name: cloudwatch
+    # The exporter refreshes from CloudWatch every 60s, so scraping more often
+    # would only return the same values.
+    scrape_interval: 60s
+    scrape_timeout: 30s
+    # Keep the exporter's per-instance labels (instance_id, region, ...).
+    honor_labels: true
+    static_configs:
+      - targets: ['cloudwatch-exporter:9106']
+
   - job_name: node
     file_sd_configs:
       - files: ['/etc/prometheus/targets/instances.json']
@@ -12,3 +35,8 @@ scrape_configs:
         target_label: instance_host
       - source_labels: [instance_id]
         target_label: instance
+
+  - job_name: prometheus
+    metrics_path: /prometheus/metrics
+    static_configs:
+      - targets: ['localhost:9090']
