@@ -62,6 +62,7 @@ flowchart LR
 | **Grafana** | `monitoring/grafana/` | Provisioned datasource + two dashboards: *Fleet Overview* and *Instance Overview*. Embedded in the UI. |
 | **Deploy workflow** | `.github/workflows/portal-deploy.yml` | Runs Terraform + Ansible for one deployment. |
 | **Release workflow** | `.github/workflows/portal-release.yml` | Tests the portal and redeploys the host over SSM. |
+| **Infra workflow** | `.github/workflows/portal-infra.yml` | Plans PRs and applies `infra/terraform` on merge (S3 state, OIDC roles from `infra/github-deploy-role.yaml`). |
 | **Host infra** | `devops-portal/infra/terraform` | EC2 host, Elastic IP, IAM, SSM parameters. |
 
 ---
@@ -298,8 +299,9 @@ Everything is named so it can be told apart in the AWS console at a glance.
 flowchart TB
     subgraph once["One-time (operator)"]
         S[bootstrap-secrets.sh<br/>SSM SecureStrings + PORTAL_WORKFLOW_KEY repo secret]
-        T[terraform apply<br/>infra/terraform]
+        R[github-deploy-role.yaml<br/>state bucket + infra OIDC roles]
     end
+    R --> T[portal-infra.yml: terraform plan / apply<br/>infra/terraform, S3 state]
     T --> UD[EC2 user_data: docker, compose, swap,<br/>host-deploy.sh, first deploy]
     S --> UD
     subgraph every["Every merge to main touching devops-portal/**"]
@@ -350,4 +352,5 @@ each one. On the host they are generated from SSM by `host-deploy.sh`.
   isolation, Terraform naming/tags, workflow bundle round-trip, exporter
   metric names. Run with `python -m pytest -q` in `devops-portal/backend`.
 - `portal-release.yml` runs the tests, a production frontend build and
-  `terraform validate` on every PR touching the portal.
+  `terraform validate` on every PR touching the portal; `portal-infra.yml`
+  posts a `terraform plan` of the host stack and fails on destroy/replace.

@@ -1,0 +1,302 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  One-time bootstrap for .github/workflows/portal-infra.yml, which plans and
+  applies devops-portal/infra/terraform (the portal host). Creates the S3
+  bucket holding that stack's Terraform state and two OIDC roles:
+    - DeployRole: the apply job, only from the 'portal-infra' environment
+    - PlanRole:   read-only plans on pull requests and manual runs on main
+  Kept outside the Terraform stack it deploys, so a bad apply can never lock
+  the pipeline out of its own role. Deploy by hand once:
+
+    aws cloudformation deploy --region ap-south-1 \
+      --stack-name devops-portal-github-infra \
+      --template-file devops-portal/infra/github-deploy-role.yaml \
+      --capabilities CAPABILITY_NAMED_IAM
+
+  then set the outputs as repository variables (see docs/demo-runbook.md).
+
+Parameters:
+  GitHubOrg:
+    Type: String
+    Default: ECD2026
+  GitHubRepo:
+    Type: String
+    Default: control_tower
+  HostNamePrefix:
+    Type: String
+    Default: devops-portal-host
+    Description: var.name of the Terraform stack; every IAM name it creates starts with this
+  SsmPrefix:
+    Type: String
+    Default: /devops-portal
+    Description: var.ssm_prefix of the Terraform stack
+
+Resources:
+  # The account's GitHub OIDC provider already exists (created by the
+  # cloud-strategy-github-deploy stack); an account can only have one.
+
+  StateBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub "devops-portal-tfstate-${AWS::AccountId}"
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-old-state-versions
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 90
+
+  StateBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref StateBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: s3:*
+            Resource:
+              - !GetAtt StateBucket.Arn
+              - !Sub "${StateBucket.Arn}/*"
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+
+  DeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      # Must not start with HostNamePrefix: this role may edit those roles.
+      RoleName: devops-portal-github-infra
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub "arn:aws:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com"
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                # Only jobs in the portal-infra environment, which only runs
+                # from main. Forks and feature branches cannot assume this role.
+                token.actions.githubusercontent.com:sub: !Sub "repo:${GitHubOrg}/${GitHubRepo}:environment:portal-infra"
+      Policies:
+        - PolicyName: terraform-portal-host
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: TerraformState
+                Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt StateBucket.Arn
+              - Sid: TerraformStateObjects
+                Effect: Allow
+                Action: [s3:GetObject, s3:PutObject, s3:DeleteObject]
+                Resource: !Sub "${StateBucket.Arn}/portal-host/*"
+              - Sid: Ec2Read
+                Effect: Allow
+                Action: ec2:Describe*
+                Resource: "*"
+              - Sid: Ec2PortalHost
+                # Instance, security group and Elastic IP of the portal host.
+                Effect: Allow
+                Action:
+                  - ec2:RunInstances
+                  - ec2:TerminateInstances
+                  - ec2:StartInstances
+                  - ec2:StopInstances
+                  - ec2:ModifyInstanceAttribute
+                  - ec2:ModifyInstanceMetadataOptions
+                  - ec2:ModifyVolume
+                  - ec2:AssociateIamInstanceProfile
+                  - ec2:ReplaceIamInstanceProfileAssociation
+                  - ec2:DisassociateIamInstanceProfile
+                  - ec2:CreateSecurityGroup
+                  - ec2:DeleteSecurityGroup
+                  - ec2:AuthorizeSecurityGroupIngress
+                  - ec2:AuthorizeSecurityGroupEgress
+                  - ec2:RevokeSecurityGroupIngress
+                  - ec2:RevokeSecurityGroupEgress
+                  - ec2:ModifySecurityGroupRules
+                  - ec2:UpdateSecurityGroupRuleDescriptionsIngress
+                  - ec2:UpdateSecurityGroupRuleDescriptionsEgress
+                  - ec2:AllocateAddress
+                  - ec2:ReleaseAddress
+                  - ec2:AssociateAddress
+                  - ec2:DisassociateAddress
+                  - ec2:CreateTags
+                  - ec2:DeleteTags
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    aws:RequestedRegion: !Ref AWS::Region
+              - Sid: HostRoles
+                Effect: Allow
+                Action:
+                  - iam:CreateRole
+                  - iam:DeleteRole
+                  - iam:GetRole
+                  - iam:UpdateRole
+                  - iam:UpdateRoleDescription
+                  - iam:UpdateAssumeRolePolicy
+                  - iam:TagRole
+                  - iam:UntagRole
+                  - iam:PutRolePolicy
+                  - iam:GetRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:ListRolePolicies
+                  - iam:ListAttachedRolePolicies
+                  - iam:ListInstanceProfilesForRole
+                  - iam:CreateInstanceProfile
+                  - iam:DeleteInstanceProfile
+                  - iam:GetInstanceProfile
+                  - iam:AddRoleToInstanceProfile
+                  - iam:RemoveRoleFromInstanceProfile
+                  - iam:TagInstanceProfile
+                  - iam:UntagInstanceProfile
+                Resource:
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:role/${HostNamePrefix}-*"
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:instance-profile/${HostNamePrefix}-*"
+              - Sid: HostRoleManagedPolicy
+                # The only managed policy the stack attaches.
+                Effect: Allow
+                Action: [iam:AttachRolePolicy, iam:DetachRolePolicy]
+                Resource: !Sub "arn:aws:iam::${AWS::AccountId}:role/${HostNamePrefix}-*"
+                Condition:
+                  ArnEquals:
+                    iam:PolicyARN: arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+              - Sid: PassHostRoleToEc2
+                Effect: Allow
+                Action: iam:PassRole
+                Resource: !Sub "arn:aws:iam::${AWS::AccountId}:role/${HostNamePrefix}-*"
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: ec2.amazonaws.com
+              - Sid: OidcProviderLookup
+                Effect: Allow
+                Action: [iam:ListOpenIDConnectProviders, iam:GetOpenIDConnectProvider]
+                Resource: "*"
+              - Sid: HostConfigParameters
+                # Only the non-secret parameters Terraform writes; the secrets
+                # under the same prefix stay unreadable to this role.
+                Effect: Allow
+                Action:
+                  - ssm:PutParameter
+                  - ssm:DeleteParameter
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                  - ssm:AddTagsToResource
+                  - ssm:RemoveTagsFromResource
+                  - ssm:ListTagsForResource
+                Resource:
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}/public_host"
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}/monitoring_sg_id"
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}/monitoring_sg_region"
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}/github_repo"
+              - Sid: PublicAmiParameter
+                Effect: Allow
+                Action: [ssm:GetParameter, ssm:GetParameters]
+                Resource: !Sub "arn:aws:ssm:${AWS::Region}::parameter/aws/service/*"
+              - Sid: DescribeParameters
+                Effect: Allow
+                Action: ssm:DescribeParameters
+                Resource: "*"
+
+  PlanRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: devops-portal-github-infra-plan
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub "arn:aws:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com"
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                # Same-repo pull requests (forks get no OIDC token) and manual
+                # plan runs on main.
+                token.actions.githubusercontent.com:sub:
+                  - !Sub "repo:${GitHubOrg}/${GitHubRepo}:pull_request"
+                  - !Sub "repo:${GitHubOrg}/${GitHubRepo}:ref:refs/heads/main"
+      Policies:
+        - PolicyName: terraform-plan-portal-host
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Plans run with -lock=false, so state is read-only here.
+              - Sid: TerraformStateRead
+                Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt StateBucket.Arn
+              - Sid: TerraformStateObjectRead
+                Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub "${StateBucket.Arn}/portal-host/*"
+              - Sid: Ec2Read
+                Effect: Allow
+                Action: ec2:Describe*
+                Resource: "*"
+              - Sid: HostRolesRead
+                Effect: Allow
+                Action:
+                  - iam:GetRole
+                  - iam:GetRolePolicy
+                  - iam:ListRolePolicies
+                  - iam:ListAttachedRolePolicies
+                  - iam:ListInstanceProfilesForRole
+                  - iam:GetInstanceProfile
+                Resource:
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:role/${HostNamePrefix}-*"
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:instance-profile/${HostNamePrefix}-*"
+              - Sid: OidcProviderLookup
+                Effect: Allow
+                Action: [iam:ListOpenIDConnectProviders, iam:GetOpenIDConnectProvider]
+                Resource: "*"
+              - Sid: HostConfigParametersRead
+                Effect: Allow
+                Action: [ssm:GetParameter, ssm:GetParameters, ssm:ListTagsForResource]
+                Resource:
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}/public_host"
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}/monitoring_sg_id"
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}/monitoring_sg_region"
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}/github_repo"
+              - Sid: PublicAmiParameter
+                Effect: Allow
+                Action: [ssm:GetParameter, ssm:GetParameters]
+                Resource: !Sub "arn:aws:ssm:${AWS::Region}::parameter/aws/service/*"
+              - Sid: DescribeParameters
+                Effect: Allow
+                Action: ssm:DescribeParameters
+                Resource: "*"
+
+Outputs:
+  StateBucketName:
+    Description: Terraform S3 backend bucket (devops-portal/infra/terraform/versions.tf)
+    Value: !Ref StateBucket
+  DeployRoleArn:
+    Description: Set as the PORTAL_INFRA_ROLE_ARN repository variable
+    Value: !GetAtt DeployRole.Arn
+  PlanRoleArn:
+    Description: Set as the PORTAL_INFRA_PLAN_ROLE_ARN repository variable
+    Value: !GetAtt PlanRole.Arn

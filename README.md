@@ -111,6 +111,7 @@ devops-portal/
 
 .github/workflows/
 ├── portal-deploy.yml   (Terraform + Ansible per deployment)
+├── portal-infra.yml    (plan / apply the portal host's Terraform)
 └── portal-release.yml  (test + release the portal to AWS)
 
 # Getting Started

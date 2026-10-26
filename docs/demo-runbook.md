@@ -31,16 +31,55 @@ grafana_admin_password, github_token, runner_mode, allow_signup}` and the
 `PORTAL_WORKFLOW_KEY` repository secret. It is safe to re-run; existing keys
 are kept.
 
-### A2. Portal host (EC2 + Elastic IP)
+### A2. Pipeline roles + Terraform state bucket
+
+Creates the S3 bucket for the portal host's Terraform state and the two OIDC
+roles `portal-infra.yml` assumes (apply / read-only plan). It reuses the
+account's existing GitHub OIDC provider.
+
+```bash
+aws cloudformation deploy --region ap-south-1 \
+  --stack-name devops-portal-github-infra \
+  --template-file devops-portal/infra/github-deploy-role.yaml \
+  --capabilities CAPABILITY_NAMED_IAM
+
+out() { aws cloudformation describe-stacks --region ap-south-1 --stack-name devops-portal-github-infra \
+          --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text; }
+gh variable set PORTAL_INFRA_ROLE_ARN      --body "$(out DeployRoleArn)" --repo ECD2026/control_tower
+gh variable set PORTAL_INFRA_PLAN_ROLE_ARN --body "$(out PlanRoleArn)"   --repo ECD2026/control_tower
+# who can reach the portal (plain HTTP) - JSON list
+gh variable set PORTAL_HTTP_INGRESS_CIDRS  --body '["<your-ip>/32"]'    --repo ECD2026/control_tower
+
+# portal-infra environment, deployable from main only
+gh api -X PUT repos/ECD2026/control_tower/environments/portal-infra \
+  -F 'deployment_branch_policy[protected_branches]=false' \
+  -F 'deployment_branch_policy[custom_branch_policies]=true'
+gh api -X POST repos/ECD2026/control_tower/environments/portal-infra/deployment-branch-policies \
+  -f name=main -f type=branch
+```
+
+Add required reviewers to `portal-infra` (Settings → Environments) to make
+every infrastructure apply wait for approval.
+
+### A2b. Portal host (EC2 + Elastic IP)
+
+**Actions → Portal Infrastructure → Run workflow → action = apply.** The same
+workflow plans every PR that touches `devops-portal/infra/terraform/**` and
+applies on merge to `main`. A plan that would destroy or replace a resource
+fails; re-run by hand with `allow_replace` ticked if that is really intended.
+
+To run it from a laptop instead (admin credentials, same S3 state):
 
 ```bash
 cd devops-portal/infra/terraform
 terraform init
-terraform apply -var git_ref=main      # or a feature branch to try it out
-# restrict who can reach the portal (plain HTTP):
-#   terraform apply -var 'http_ingress_cidrs=["<your-ip>/32"]'
+terraform apply -var 'http_ingress_cidrs=["<your-ip>/32"]'
 terraform output
 ```
+
+Moving a stack that still has local state into S3: `terraform init
+-migrate-state` in that directory, answer `yes`, then delete the local
+`terraform.tfstate*` files.
 
 | Output | Use |
 |---|---|
@@ -59,6 +98,7 @@ sudo tail -f /var/log/devops-portal-bootstrap.log
 ### A3. Release pipeline variables
 
 ```bash
+cd devops-portal/infra/terraform   # terraform output reads the S3 state
 gh variable set PORTAL_AWS_REGION       --body ap-south-1              --repo ECD2026/control_tower
 gh variable set PORTAL_HOST_INSTANCE_ID --body "$(terraform output -raw instance_id)" --repo ECD2026/control_tower
 gh variable set PORTAL_RELEASE_ROLE_ARN --body "$(terraform output -raw github_release_role_arn)" --repo ECD2026/control_tower
@@ -182,6 +222,7 @@ terminated and it drops out of Prometheus targets and the fleet dashboard.
 
 ```bash
 cd devops-portal/infra/terraform && terraform destroy
+aws cloudformation delete-stack --region ap-south-1 --stack-name devops-portal-github-infra  # state bucket is retained
 aws ssm delete-parameters --region ap-south-1 --names \
   /devops-portal/encryption_key /devops-portal/jwt_secret /devops-portal/workflow_key \
   /devops-portal/grafana_admin_password /devops-portal/github_token \
