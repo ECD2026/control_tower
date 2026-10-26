@@ -85,22 +85,6 @@ def _build_package_tasks(
         groups: docker
         append: yes""")
 
-        elif pkg_lower in ("kubernetes", "k3s", "k8s"):
-            tasks.append("""\
-    - name: Install k3s (lightweight Kubernetes)
-      shell: |
-        curl -sfL https://get.k3s.io | sh -
-      args:
-        creates: /usr/local/bin/k3s
-        executable: /bin/bash
-
-    - name: Wait for k3s to be ready
-      shell: k3s kubectl get nodes
-      retries: 10
-      delay: 10
-      register: k3s_ready
-      until: k3s_ready.rc == 0""")
-
         elif pkg_lower == "nginx":
             if is_ubuntu:
                 tasks.append("""\
@@ -330,28 +314,6 @@ def generate_ansible(request) -> str:
         restart_policy: always
         published_ports:
           - "80:80" """)
-
-    # ── Kubernetes deployment ────────────────────────────────────────────────
-    if request.kubernetes and request.docker_image and request.docker_image.strip():
-        image = request.docker_image.strip()
-        replicas = request.replicas
-        tasks.append(f"""\
-    - name: Deploy application to Kubernetes
-      shell: |
-        k3s kubectl create deployment devops-app \\
-          --image={image} \\
-          --replicas={replicas} \\
-          --dry-run=client -o yaml | k3s kubectl apply -f -
-        k3s kubectl expose deployment devops-app \\
-          --type=NodePort --port=80 \\
-          --dry-run=client -o yaml | k3s kubectl apply -f -
-      args:
-        executable: /bin/bash
-
-    - name: Wait for Kubernetes deployment
-      shell: k3s kubectl rollout status deployment/devops-app --timeout=120s
-      args:
-        executable: /bin/bash""")
 
     tasks.extend(_build_custom_command_tasks(request.custom_commands))
 

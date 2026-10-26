@@ -62,12 +62,6 @@ on:
       docker_image:
         type: string
         default: ""
-      kubernetes:
-        type: boolean
-        default: false
-      replicas:
-        type: string
-        default: "1"
       detailed_monitoring:
         description: Enable 1-minute CloudWatch metrics
         type: boolean
@@ -106,8 +100,6 @@ jobs:
       PACKAGES_JSON: ${{ inputs.packages_json }}
       CUSTOM_COMMANDS: ${{ inputs.custom_commands }}
       DOCKER_IMAGE: ${{ inputs.docker_image }}
-      KUBERNETES: ${{ inputs.kubernetes }}
-      REPLICAS: ${{ inputs.replicas }}
       DETAILED_MONITORING: ${{ inputs.detailed_monitoring }}
       DB_PATH: ${{ github.workspace }}/deployments.db
 
@@ -130,7 +122,9 @@ jobs:
 
       - name: Install dependencies
         working-directory: devops-portal/backend
-        run: pip install -r requirements.txt ansible
+        # ansible 10 (ansible-core 2.17) is the last release that still runs
+        # modules on Amazon Linux 2's Python 3.7.
+        run: pip install -r requirements.txt "ansible>=10,<11"
 
       - name: Point temp dir at runner temp
         run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"

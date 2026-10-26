@@ -149,8 +149,6 @@ def _dispatch(
         "packages_json": json.dumps(request.packages),
         "custom_commands": request.custom_commands,
         "docker_image": request.docker_image or "",
-        "kubernetes": "true" if request.kubernetes else "false",
-        "replicas": str(request.replicas),
     }
     _request(
         config,
@@ -260,21 +258,32 @@ async def run_github_actions_deployment(
         await log(f"[{_ts()}] Could not fetch run logs: {exc}")
 
     conclusion = run.get("conclusion")
-    if conclusion != "success":
-        raise RuntimeError(
-            f"GitHub Actions run {run_id} finished with conclusion {conclusion}."
-        )
+    succeeded = conclusion == "success"
 
-    await log(f"[{_ts()}] GitHub Actions run {run_id} completed successfully")
+    if succeeded:
+        await log(f"[{_ts()}] GitHub Actions run {run_id} completed successfully")
 
     if mode == "deploy":
         # Imported lazily to avoid a circular import at module load.
         from services.aws_reconciler import sync_deployment_instances
 
-        found = await sync_deployment_instances(deployment_id, request, credential)
-        await log(
-            f"[{_ts()}] Registered {len(found)} instance(s) from EC2 tag "
-            f"PortalDeploymentId={deployment_id}"
+        # Terraform may have created instances even when a later step (e.g.
+        # Ansible) failed. Register them anyway so they show on the Instances
+        # page and can be reconfigured or deleted instead of being orphaned.
+        try:
+            found = await sync_deployment_instances(deployment_id, request, credential)
+            await log(
+                f"[{_ts()}] Registered {len(found)} instance(s) from EC2 tag "
+                f"PortalDeploymentId={deployment_id}"
+            )
+        except Exception as exc:
+            if succeeded:
+                raise
+            await log(f"[{_ts()}] Could not register instances after failed run: {exc}")
+
+    if not succeeded:
+        raise RuntimeError(
+            f"GitHub Actions run {run_id} finished with conclusion {conclusion}."
         )
 
     return ExecutionResult(

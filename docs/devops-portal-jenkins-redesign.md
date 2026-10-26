@@ -146,8 +146,6 @@ environment inside the workspace before running the deployment script.
 - `PACKAGES_JSON`
 - `CUSTOM_COMMANDS`
 - `DOCKER_IMAGE`
-- `KUBERNETES`
-- `REPLICAS`
 
 ## Why Keep the Local Executor
 

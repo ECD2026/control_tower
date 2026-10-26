@@ -13,7 +13,7 @@ A user signs in, uploads their AWS access key + secret and an SSH key pair,
 fills in a form, and the portal:
 
 1. **Provisions** EC2 instances with Terraform (run on GitHub Actions).
-2. **Configures** them with Ansible (packages, Docker image, k3s, custom commands).
+2. **Configures** them with Ansible (packages, Docker image, custom commands).
 3. **Manages** them afterwards: pause (stop), resume (start), restart
    (reboot), terminate, and day-2 Ansible runs.
 4. **Monitors** them: CloudWatch metrics → Prometheus → Grafana, embedded in

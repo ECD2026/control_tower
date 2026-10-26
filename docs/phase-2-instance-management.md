@@ -115,7 +115,7 @@ lives in small helpers (`_build_package_tasks`, `_build_system_update_task`,
 - `generate_ansible(request)` — unchanged behavioural contract; still targets
   `hosts: servers` and produces the full bootstrap playbook.
 - `generate_ansible_for_host(instance, packages, custom_commands)` — new.
-  Targets `hosts: target`, skips the k3s/docker-image bootstrap (those are
+  Targets `hosts: target`, skips the docker-image bootstrap (those are
   first-boot concerns), and only emits package installs + custom commands.
 
 ## New service: `instance_configurator`
@@ -180,7 +180,7 @@ this phase — if you want periodic sync, wire up an external cron or the
 - **Left pane**: table of instances with id / region / state / public IP /
   created-at. Click a row to select it.
 - **Right pane**: when a row is selected, shows its deployment/key-pair/ssh
-  metadata, a package multi-select (`Docker`, `Kubernetes`, `Nginx`, `Git`,
+  metadata, a package multi-select (`Docker`, `Nginx`, `Git`,
   `Python3`, `Node.js`), and a custom-commands textarea.
 - **Apply configuration** button posts to the configure endpoint, opens an
   `EventSource` against the configuration's SSE stream, and reuses `LogsPanel`
