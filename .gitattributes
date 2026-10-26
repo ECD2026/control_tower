@@ -1,0 +1,7 @@
+# Scripts that run on Linux (EC2 host, GitHub runners, containers) must keep
+# LF endings even when checked out on Windows - Terraform embeds
+# host-deploy.sh into user_data straight from the working copy.
+*.sh      text eol=lf
+*.tftpl   text eol=lf
+Dockerfile text eol=lf
+*.conf    text eol=lf

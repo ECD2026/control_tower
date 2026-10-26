@@ -1,3 +1,5 @@
+# Prometheus is served under /prometheus (see docker-compose.yml), so the
+# datasource URL includes that prefix.
 apiVersion: 1
 
 datasources:
@@ -5,6 +7,8 @@ datasources:
     uid: prometheus
     type: prometheus
     access: proxy
-    url: http://prometheus:9090
+    url: http://prometheus:9090/prometheus
     isDefault: true
     editable: false
+    jsonData:
+      timeInterval: 30s

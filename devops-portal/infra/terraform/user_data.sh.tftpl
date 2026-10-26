@@ -1,0 +1,42 @@
+#!/bin/bash
+# First-boot setup for the DevOps portal host (Amazon Linux 2023).
+# Rendered by Terraform (templatefile); $${...} placeholders are filled there.
+#
+# 1. Docker + compose/buildx plugins, git, 2 GiB swap (image builds on t3.small)
+# 2. /opt/devops-portal/host.env      - where to find config (non-secret)
+# 3. /opt/devops-portal/bin/host-deploy.sh - checkout + .env from SSM + compose up
+# 4. First deploy. If the secrets are not in SSM yet the deploy waits for them.
+set -euxo pipefail
+exec > >(tee -a /var/log/devops-portal-bootstrap.log) 2>&1
+
+dnf install -y docker git jq
+systemctl enable --now docker
+
+mkdir -p /usr/local/lib/docker/cli-plugins
+curl -fsSL https://github.com/docker/compose/releases/download/v2.29.1/docker-compose-linux-x86_64 \
+  -o /usr/local/lib/docker/cli-plugins/docker-compose
+curl -fsSL https://github.com/docker/buildx/releases/download/v0.16.2/buildx-v0.16.2.linux-amd64 \
+  -o /usr/local/lib/docker/cli-plugins/docker-buildx
+chmod +x /usr/local/lib/docker/cli-plugins/*
+
+if [ ! -f /swapfile ]; then
+  dd if=/dev/zero of=/swapfile bs=1M count=2048
+  chmod 600 /swapfile
+  mkswap /swapfile
+  swapon /swapfile
+  echo '/swapfile swap swap defaults 0 0' >> /etc/fstab
+fi
+
+mkdir -p /opt/devops-portal/bin
+cat > /opt/devops-portal/host.env <<'ENV'
+AWS_REGION=${region}
+SSM_PREFIX=${ssm_prefix}
+GITHUB_REPO=${github_repo}
+ENV
+
+cat > /opt/devops-portal/bin/host-deploy.sh <<'SCRIPT'
+${host_deploy}
+SCRIPT
+chmod 755 /opt/devops-portal/bin/host-deploy.sh
+
+/opt/devops-portal/bin/host-deploy.sh "${git_ref}" --wait-for-secrets

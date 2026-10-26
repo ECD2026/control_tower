@@ -1,169 +1,211 @@
 # Demo Runbook — DevOps Portal
 
-Everything you need to run the full demo from a cold machine.
-Run each section in a **separate terminal** — they all stay open during the demo.
+Everything needed to stand the portal up and walk through the demo:
+login → credentials → deploy (GitHub Actions) → pause / resume / restart /
+configure → monitor in Grafana → clean up.
+
+How it works under the hood: [architecture.md](architecture.md).
 
 ---
 
-## Prerequisites (one-time, already done)
+## Part A — One-time setup on AWS
 
-- Jenkins running at `http://localhost:8080`
-- WSL 2 with Ubuntu installed (`wsl --install -d Ubuntu`)
-- Ansible installed inside WSL (`wsl -- bash -lc "ansible --version"`)
-- Terraform at `C:\Users\Asus\develop\terraform\terraform.exe`
-- Python 3 on Windows (`python --version`)
-- Node.js on Windows (`node --version`)
-- `agent.jar` downloaded to `C:\Users\Asus\agent.jar`
-- `.env` file at `devops-portal/backend/.env` with real AWS keys + Jenkins config
+Run from the repo root on a machine with the **AWS CLI** (an admin of the
+target account) and the **GitHub CLI** (admin on the repo) logged in. In Git
+Bash on Windows, export `MSYS_NO_PATHCONV=1` first so `/devops-portal/...`
+paths are not rewritten.
+
+### A1. Secrets → SSM Parameter Store + GitHub
+
+```bash
+# Recommended: a fine-grained PAT on this repo only
+# (Actions: read & write, Contents: read). Falls back to `gh auth token`.
+export PORTAL_GITHUB_TOKEN=github_pat_xxx
+
+# local until portal-deploy.yml is on the default branch (see A4)
+PORTAL_RUNNER_MODE=local bash devops-portal/infra/scripts/bootstrap-secrets.sh ap-south-1 ECD2026/control_tower
+```
+
+This creates `/devops-portal/{encryption_key, jwt_secret, workflow_key,
+grafana_admin_password, github_token, runner_mode, allow_signup}` and the
+`PORTAL_WORKFLOW_KEY` repository secret. It is safe to re-run; existing keys
+are kept.
+
+### A2. Portal host (EC2 + CloudFront)
+
+```bash
+cd devops-portal/infra/terraform
+terraform init
+terraform apply -var git_ref=main      # or a feature branch to try it out
+terraform output
+```
+
+| Output | Use |
+|---|---|
+| `portal_url` | `https://dxxxx.cloudfront.net` — open this |
+| `instance_id` | SSM target for the release workflow |
+| `github_release_role_arn` | release workflow role |
+
+First boot takes ~10 minutes: Docker install, image builds, `docker compose
+up`. Follow it with:
+
+```bash
+aws ssm start-session --target <instance_id> --region ap-south-1
+sudo tail -f /var/log/devops-portal-bootstrap.log
+```
+
+The CloudFront distribution needs ~5 minutes to deploy globally.
+
+### A3. Release pipeline variables
+
+```bash
+gh variable set PORTAL_AWS_REGION       --body ap-south-1              --repo ECD2026/control_tower
+gh variable set PORTAL_HOST_INSTANCE_ID --body "$(terraform output -raw instance_id)" --repo ECD2026/control_tower
+gh variable set PORTAL_RELEASE_ROLE_ARN --body "$(terraform output -raw github_release_role_arn)" --repo ECD2026/control_tower
+```
+
+From then on every merge to `main` that touches `devops-portal/**` is tested
+and rolled out by `portal-release.yml`. To deploy another ref by hand:
+**Actions → Portal Release → Run workflow → ref**.
+
+### A4. Switch deployments to GitHub Actions
+
+Once `.github/workflows/portal-deploy.yml` is on `main`:
+
+```bash
+aws ssm put-parameter --region ap-south-1 --name /devops-portal/runner_mode \
+  --value github_actions --type String --overwrite
+gh workflow run portal-release.yml --repo ECD2026/control_tower   # redeploy to apply
+```
 
 ---
 
-## Terminal 1 — Jenkins WSL Agent
+## Part B — Running locally (optional)
 
-This connects your user account (which has WSL access) to Jenkins.
-Must be running before you trigger any Jenkins build.
-
-```powershell
-
-wsl cp /mnt/c/Users/Asus/.ssh/automatic.pem /home/asus/.ssh/automatic.pem
-wsl chmod 600 /home/asus/.ssh/automatic.pem
-wsl chown asus:asus /home/asus/.ssh/automatic.pem
-wsl ls -l /home/asus/.ssh/automatic.pem
-
-cd C:\Users\Asus
-java -jar agent.jar `
-  -url http://localhost:8080/ `
-  -secret 1425c95a3737034285c076bb7ed37790d6135b19840050a7a411da7abb38181c `
-  -name "wsl-agent" `
-  -webSocket `
-  -workDir "C:\ProgramData\Jenkins\agent"
-
+```bash
 cd devops-portal
-docker-compose up -d prometheus grafana
-
+echo "DEPLOYMENT_RUNNER_MODE=local" > .env       # Terraform + Ansible run in the backend container
+docker compose up -d --build
+# → http://localhost   (set PORTAL_HTTP_PORT=8088 in .env if port 80 is taken)
 ```
 
-**Expected output:**
-```
-INFO: WebSocket connection open
-INFO: Connected
-```
+For frontend development with hot reload, run `npm run dev` in
+`devops-portal/frontend` against the containers. The backend, Prometheus and
+Grafana ports are bound to `127.0.0.1`.
 
-Leave this terminal open. If it disconnects, re-run the same command.
-
-> The secret is tied to this Jenkins instance. If Jenkins is reinstalled,
-> get the new secret from: Jenkins → Manage Nodes → wsl-agent → Agent command.
+Backend tests: `cd devops-portal/backend && python -m pytest -q`.
 
 ---
 
-## Terminal 2 — Backend
+## Part C — Demo flow
 
-```powershell
+Open the portal URL. The sidebar on the left has **Overview, Deploy,
+Instances, Monitoring, Deployments** and **Settings → Credentials**.
 
-cd C:\Users\Asus\Documents\GitHub\control_tower\devops-portal\backend
-pip install -r requirements.txt   # skip if already done
-uvicorn main:app --reload --port 8000
+### 1. Sign in
 
-```
+**Create account** with an email and a password (8+ characters). Overview
+shows a *Getting started* checklist.
 
-**Expected output:**
-```
-INFO:     Application startup complete.
-INFO:     Uvicorn running on http://0.0.0.0:8000
-```
+### 2. Upload AWS credentials and a key pair (Credentials)
 
-Smoke test (in any other terminal):
-```powershell
-curl.exe http://localhost:8000/health
-# → {"status":"healthy","service":"DevOps Automation Portal"}
-```
+1. **Add credentials** → display name, **access key ID**, **secret access key**,
+   default region (`ap-south-1`).
+2. SSH key pair: **Generate new** (download the `.pem` when prompted), or
+   **Upload .pem** of an existing EC2 key pair. Give it a name such as `demo-key`.
+3. **Verify & save**. The portal checks the keys with AWS STS and shows
+   the AWS account ID. Bad keys are rejected with AWS's message.
+
+> The IAM user needs EC2 (instances, security groups, key pairs) and
+> `cloudwatch:GetMetricData`. Use a dedicated demo user, e.g.
+> `devops-portal-demo`, not root keys.
+
+### 3. Deploy (Deploy)
+
+1. Credentials: pick the one from step 2 (the key pair fills in).
+2. Name: `demo-web` → instances become `demo-web-1`, `demo-web-2`, ….
+3. Region `ap-south-1`, type `t3.micro`, 1 instance, Amazon Linux.
+4. Packages: keep **Node Exporter**, add **Nginx**. Keep **Detailed CloudWatch
+   monitoring** on.
+5. **Generate Plan** first to show the Terraform plan, then **Deploy
+   Infrastructure**.
+6. Live Output streams the run:
+   - `[GITHUB] …` lines are the workflow's steps. **GitHub run** in the header
+     opens the run on GitHub.
+   - In `local` mode you see `[TERRAFORM]` and `[ANSIBLE]` lines directly.
+7. On success: **View instances**.
+
+In the EC2 console, the resources are easy to spot: instance `demo-web-1`,
+SG `devops-portal-<id8>-sg-…`, key pair `devops-portal-<id8>-demo-key-…`, all
+tagged `PortalDeploymentId`.
+
+### 4. Manage the instance (Instances → Overview tab)
+
+- **Live metrics**: CPU, network and status checks from CloudWatch, plus
+  memory/disk from node_exporter. The first datapoints arrive 2–5 minutes
+  after launch.
+- **Pause** → the state goes *Pausing* → *Paused* (EC2 stop).
+- **Resume** → *Starting* → *Running*. Point out that the public IP changed
+  and the portal picked it up.
+- **Restart** → EC2 reboot.
+
+### 5. Configure (Instances → Configure tab)
+
+Tick **Git** / **Docker**, optionally add `echo hello from the portal`,
+then **Apply with Ansible**. Ansible logs stream live and end with
+`PLAY RECAP … failed=0`.
+
+### 6. Monitor
+
+- **Instances → Monitoring tab**: the per-instance Grafana dashboard
+  (CloudWatch rows plus the node_exporter OS row).
+- **Monitoring** page: the fleet dashboard showing all your instances, CPU and
+  network by instance, and paused count.
+- **Prometheus targets** button: the `cloudwatch` and `node` jobs are *UP*.
+
+Opening `/grafana` in a private window without logging in redirects to the
+portal login. The monitoring stack is behind portal auth.
+
+### 7. History (Deployments)
+
+Every plan/deploy is listed with its runner and GitHub run link. Click a row
+to replay its full log.
+
+### 8. Clean up
+
+Instances → select → **Terminate** (confirm). The reconcile loop marks it
+terminated and it drops out of Prometheus targets and the fleet dashboard.
 
 ---
 
-## Terminal 3 — Frontend
+## Part D — Tearing the portal down
 
-```powershell
-
-cd C:\Users\Asus\Documents\GitHub\control_tower\devops-portal\frontend
-npm install    # skip if node_modules already exists
-npm run dev
-
+```bash
+cd devops-portal/infra/terraform && terraform destroy
+aws ssm delete-parameters --region ap-south-1 --names \
+  /devops-portal/encryption_key /devops-portal/jwt_secret /devops-portal/workflow_key \
+  /devops-portal/grafana_admin_password /devops-portal/github_token \
+  /devops-portal/runner_mode /devops-portal/allow_signup
+gh secret delete PORTAL_WORKFLOW_KEY --repo ECD2026/control_tower
 ```
 
-**Expected output:**
-```
-  VITE ready in ...ms
-  ➜  Local:   http://localhost:5173/
-```
-
-Open **http://localhost:5173** in your browser.
-
----
-
-## Demo flow
-
-### 1. Deploy a new instance (Deploy tab)
-
-1. Open `http://localhost:5173` → **Deploy** tab.
-2. Fill in the form:
-   - Region: `ap-south-1`
-   - Instance type: `t2.micro`
-   - Key pair name: `automatic`
-   - OS: `Amazon Linux`
-   - Packages: pick any (e.g. Git, Docker)
-3. Click **Deploy**.
-4. Watch live logs stream in the right panel — lines prefixed `[JENKINS]` confirm Jenkins is running the build.
-5. A Jenkins link appears in the top bar. Click it to open the Jenkins build page.
-6. Wait for `[HH:MM:SS] Deployment completed` — status badge turns green.
-
-### 2. Verify the instance exists (Instances tab)
-
-1. Click **Instances** tab.
-2. The newly provisioned instance appears with state `running`.
-3. Click **Reconcile** to sync state with AWS — confirm `checked: 1`.
-
-### 3. Day-2 configuration (Instances tab)
-
-1. Click the instance row to select it.
-2. Tick additional packages (e.g. Nginx).
-3. Optionally add custom commands in the text box.
-4. Click **Apply configuration**.
-5. Live Ansible logs stream in the panel below — watch for `PLAY RECAP` with `failed=0`.
-
-### 4. Deployment history (History tab)
-
-1. Click **History** tab.
-2. The deployment row shows execution mode `jenkins` and links to the Jenkins build.
-3. Click the row to jump back to the Deploy tab with logs replayed.
-
----
-
-## Stopping everything
-
-```powershell
-# Terminal 3 — frontend
-Ctrl+C
-
-# Terminal 2 — backend
-Ctrl+C
-
-# Terminal 1 — Jenkins agent
-Ctrl+C
-```
-
-Jenkins itself keeps running as a Windows service — no action needed.
+Instances users deployed are **not** part of this stack. Terminate them from
+the portal first, or find them by tag `Project=devops-portal,Component=workload`.
 
 ---
 
 ## Troubleshooting
 
 | Symptom | Likely cause | Fix |
-|---------|-------------|-----|
-| Backend 500 on `/api/deploy` | `.env` not loaded | Confirm `uvicorn` was started from `devops-portal/backend/` dir |
-| Jenkins 404 in portal logs | Wrong job name | Check `JENKINS_JOB_NAME` in `.env` matches Jenkins UI exactly |
-| Jenkins build queued but never starts | WSL agent not connected | Re-run Terminal 1 command; check Jenkins → Nodes → wsl-agent is online |
-| `terraform: command not found` in Jenkins | Terraform checked inside WSL | Expected — Terraform runs natively on Windows via `runner.py`, not in WSL |
-| `ansible: command not found` in Jenkins | Ansible not in WSL | `wsl -- bash -lc "sudo apt install -y ansible"` |
-| SSH timeout during Ansible | PEM not in WSL `~/.ssh` | Pipeline copies it automatically; check Jenkins build logs for copy errors |
-| `[TIMEOUT] No activity` in portal UI | Old backend still running | Restart `uvicorn` — the keepalive fix requires the new code |
-| Instance not in Instances tab | Deploy ran before Phase 2 | Use the backfill SQL in `docs/post-phase-2-configuration.md` §5 |
+|---|---|---|
+| Portal URL returns 502/504 | Host still bootstrapping, or a container is down | `aws ssm start-session …` then `sudo docker compose -f /opt/devops-portal/src/devops-portal/docker-compose.yml ps`; check `/var/log/devops-portal-bootstrap.log` |
+| Bootstrap log: `Missing /devops-portal/…` | A1 not run (or after the 30-min wait) | Run A1, then `sudo /opt/devops-portal/bin/host-deploy.sh main` on the host or re-run Portal Release |
+| `AWS rejected these credentials` | Wrong/inactive keys | Check the IAM user's access key status |
+| Deploy log: `PORTAL_WORKFLOW_KEY is not set` / `Could not decrypt credentials_blob` | Portal and repo secret differ | Re-run A1 (it re-syncs the repo secret from SSM) |
+| Deploy log: GitHub API 404 on `/dispatches` | `portal-deploy.yml` is not on the default branch | Merge it to `main`, or set `runner_mode=local` (A4) |
+| Deploy log: GitHub API 401/403 | Token expired or lacks Actions write | New PAT → `PORTAL_GITHUB_TOKEN=… bootstrap-secrets.sh` → redeploy |
+| Live metrics show `—` | CloudWatch has no datapoints yet | Wait 2–5 min. Check `cloudwatch_exporter_errors_total` in Prometheus |
+| Memory/Disk `—`, CPU fine | node_exporter not installed, or the instance is in another region than the host | Install Node Exporter (Configure tab). Cross-region instances only get CloudWatch |
+| Grafana iframe shows the portal login | Session expired | Sign in again |
+| Configure: `SSH did not become ready` | SG lacks port 22 or the instance is paused | Keep port 22 in the deploy form; resume the instance |
+| Pause/Resume stuck on *Pausing*/*Starting* | Background poll timed out | **Sync with AWS** on the Instances page |

@@ -1,0 +1,175 @@
+name: Portal Deployment
+
+# Dispatched by the DevOps portal backend (services/github_actions_executor.py)
+# whenever a user clicks Plan/Deploy with DEPLOYMENT_RUNNER_MODE=github_actions.
+#
+# run-name embeds the deployment id so the backend can find the run it triggered.
+#
+# Secrets: the user's AWS keys and SSH key pair arrive in `credentials_blob`,
+# Fernet-encrypted by the portal with PORTAL_WORKFLOW_KEY. The only repository
+# secret this workflow needs is that same PORTAL_WORKFLOW_KEY.
+run-name: portal-${{ inputs.deployment_id }} ${{ inputs.deploy_mode }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploy_mode:
+        description: Run plan-only or full deploy
+        type: choice
+        options: [plan, deploy]
+        default: plan
+      deployment_id:
+        description: Portal deployment identifier
+        type: string
+        required: true
+      credentials_blob:
+        description: Encrypted AWS keys + SSH key pair (sealed by the portal)
+        type: string
+        required: true
+      name:
+        description: Friendly name; instances are tagged Name=<name>-<n>
+        type: string
+        default: ""
+      provider:
+        type: string
+        default: aws
+      region:
+        type: string
+        default: us-east-1
+      instance_type:
+        type: string
+        default: t2.micro
+      instance_count:
+        type: string
+        default: "1"
+      key_pair_name:
+        description: Logical key pair name (prefix of the per-deployment AWS key pair)
+        type: string
+        required: true
+      security_group_ports_json:
+        type: string
+        default: "[22, 80, 443]"
+      os_type:
+        type: choice
+        options: [amazon_linux, ubuntu]
+        default: amazon_linux
+      packages_json:
+        type: string
+        default: "[]"
+      custom_commands:
+        type: string
+        default: ""
+      docker_image:
+        type: string
+        default: ""
+      kubernetes:
+        type: boolean
+        default: false
+      replicas:
+        type: string
+        default: "1"
+      detailed_monitoring:
+        description: Enable 1-minute CloudWatch metrics
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+# One group per deployment: different users' deployments run in parallel,
+# a single deployment is never run twice at once.
+concurrency:
+  group: portal-deploy-${{ inputs.deployment_id }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: ${{ inputs.deploy_mode }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      TF_IN_AUTOMATION: "true"
+      PYTHONUNBUFFERED: "1"
+      PYTHONUTF8: "1"
+      AWS_DEFAULT_REGION: ${{ inputs.region }}
+      ANSIBLE_HOST_KEY_CHECKING: "False"
+      DEPLOY_MODE: ${{ inputs.deploy_mode }}
+      DEPLOYMENT_ID: ${{ inputs.deployment_id }}
+      DEPLOYMENT_NAME: ${{ inputs.name }}
+      PROVIDER: ${{ inputs.provider }}
+      REGION: ${{ inputs.region }}
+      INSTANCE_TYPE: ${{ inputs.instance_type }}
+      INSTANCE_COUNT: ${{ inputs.instance_count }}
+      KEY_PAIR_NAME: ${{ inputs.key_pair_name }}
+      SECURITY_GROUP_PORTS_JSON: ${{ inputs.security_group_ports_json }}
+      OS_TYPE: ${{ inputs.os_type }}
+      PACKAGES_JSON: ${{ inputs.packages_json }}
+      CUSTOM_COMMANDS: ${{ inputs.custom_commands }}
+      DOCKER_IMAGE: ${{ inputs.docker_image }}
+      KUBERNETES: ${{ inputs.kubernetes }}
+      REPLICAS: ${{ inputs.replicas }}
+      DETAILED_MONITORING: ${{ inputs.detailed_monitoring }}
+      DB_PATH: ${{ github.workspace }}/deployments.db
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.8.5
+          terraform_wrapper: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: devops-portal/backend/requirements.txt
+
+      - name: Install dependencies
+        working-directory: devops-portal/backend
+        run: pip install -r requirements.txt ansible
+
+      - name: Point temp dir at runner temp
+        run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
+
+      - name: Validate inputs
+        run: |
+          if [ -z "${KEY_PAIR_NAME// }" ]; then
+            echo "KEY_PAIR_NAME is required." >&2
+            exit 1
+          fi
+
+      # Decrypts credentials_blob, masks every secret in the log, exports the
+      # AWS keys via $GITHUB_ENV and writes ~/.ssh/<key_pair_name>.pem.
+      - name: Open credential bundle
+        working-directory: devops-portal/backend
+        env:
+          PORTAL_CREDENTIALS_BLOB: ${{ inputs.credentials_blob }}
+          PORTAL_WORKFLOW_KEY: ${{ secrets.PORTAL_WORKFLOW_KEY }}
+        run: python scripts/open_workflow_bundle.py
+
+      - name: Run portal deployment
+        working-directory: devops-portal/backend
+        run: python scripts/run_portal_deployment.py
+
+      # Generated files plus the Terraform state, so the security group and
+      # key pair of a deployment can be cleaned up with `terraform destroy`.
+      - name: Archive generated files
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: portal-${{ inputs.deployment_id }}
+          path: |
+            ${{ runner.temp }}/**/main.tf
+            ${{ runner.temp }}/**/setup.yml
+            ${{ runner.temp }}/**/inventory.ini
+            ${{ runner.temp }}/**/terraform.tfstate
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Remove SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/${KEY_PAIR_NAME}.pem"

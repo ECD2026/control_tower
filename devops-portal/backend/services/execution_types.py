@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Awaitable, Callable, Literal
 
 
-ExecutionMode = Literal["local", "jenkins"]
+ExecutionMode = Literal["local", "github_actions"]
 LogFn = Callable[[str], Awaitable[None]]
 MetadataFn = Callable[[str | None, str | None], Awaitable[None]]
 

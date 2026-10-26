@@ -18,11 +18,11 @@ Improve scalability, reliability, and efficiency
 
 # Architecture Overview
 
-Frontend (UI)
+Frontend (React UI, login, per-user AWS credentials)
 ↓
 Backend (FastAPI)
 ↓
-Jenkins (Execution Engine)
+GitHub Actions (Execution Engine — portal-deploy.yml)
 ↓
 Terraform (Infrastructure Provisioning)
 ↓
@@ -30,13 +30,15 @@ AWS EC2 (Cloud Resources)
 ↓
 Ansible (Configuration Management)
 ↓
-Monitoring (Prometheus + Grafana)
+Monitoring (CloudWatch exporter → Prometheus → Grafana)
+
+Full details, diagrams and the security model: [docs/architecture.md](docs/architecture.md).
 
 Tech Stack
 
 Frontend: React (Vite)
 Backend: FastAPI (Python)
-CI/CD: Jenkins
+CI/CD: GitHub Actions
 Infrastructure: Terraform
 Configuration: Ansible
 Cloud: AWS EC2
@@ -53,25 +55,28 @@ Supports multiple configurations
 Automates server setup using Ansible
 Installs required packages and dependencies
 Executes custom commands
-3. Jenkins Integration
-Backend triggers Jenkins pipelines
-Ensures secure and controlled execution
-Provides real-time log streaming
+3. GitHub Actions Integration
+Backend dispatches the portal-deploy.yml workflow
+The user's AWS keys and SSH key travel encrypted and are masked in logs
+Provides real-time log streaming and a link to the run
 4. Instance Management (Day-2 Operations)
 View and manage deployed instances
+Pause, resume, restart and terminate instances
 Install additional packages anytime
 Update systems without redeployment
 5. Monitoring System
-Prometheus collects system metrics
-Grafana visualizes CPU, memory, and network performance
+A multi-account CloudWatch exporter feeds Prometheus for every instance
+node_exporter adds memory and disk metrics when installed
+Grafana dashboards are embedded in the portal, behind its login
 6. Docker & Kubernetes Support
 Supports containerized application deployment
 Optional Kubernetes orchestration for scaling and management
 
 # How It Works
+User signs in and uploads AWS access keys + an SSH key pair (verified with STS, encrypted at rest)
 User submits a deployment request through the UI
-Backend validates the request and triggers Jenkins
-Jenkins pipeline executes:
+Backend validates the request and dispatches the GitHub Actions workflow
+The workflow executes:
 Terraform → provisions AWS infrastructure
 Ansible → configures instances
 Deployment logs are streamed to the frontend
@@ -79,8 +84,10 @@ Instance details are stored for future management
 Users can perform Day-2 operations
 Monitoring tools track system performance
 Security Features
-Separation of execution using Jenkins
-Secure handling of AWS credentials and SSH keys
+Per-user accounts; every resource and action is scoped to its owner
+Separation of execution using GitHub Actions
+AWS credentials and SSH keys encrypted at rest and in transit to the runner
+HTTPS via CloudFront; monitoring UIs only reachable after login
 Controlled access via AWS Security Groups
 Restricted monitoring ports
 Logging and traceability of all operations
@@ -96,14 +103,23 @@ devops-portal/
 │ ├── generators/
 │ └── database/
 │
-├── jenkins/
+├── exporters/          (CloudWatch exporter, inside backend/)
+├── infra/              (Terraform + scripts for the portal host)
 ├── monitoring/
 ├── docker-compose.yml
-└── docs/
+└── docs/               (architecture.md, demo-runbook.md)
+
+.github/workflows/
+├── portal-deploy.yml   (Terraform + Ansible per deployment)
+└── portal-release.yml  (test + release the portal to AWS)
+
+# Getting Started
+Hosting on AWS and the demo walkthrough: [docs/demo-runbook.md](docs/demo-runbook.md).
+Local: `cd devops-portal && docker compose up -d --build`, then open http://localhost.
 
 # Future Enhancements
 Integrate security tools like Trivy and SonarQube
-Implement Role-Based Access Control (RBAC)
+Extend user accounts with Role-Based Access Control (RBAC)
 Extend support to AWS Control Tower for real OU management
 Add advanced CI/CD pipelines for application deployment
 Enable multi-cloud support

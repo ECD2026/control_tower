@@ -1,3 +1,10 @@
+"""
+Runs a deployment in-process: Terraform apply, then Ansible over SSH.
+
+Used directly when DEPLOYMENT_RUNNER_MODE=local, and by
+scripts/run_portal_deployment.py inside the GitHub Actions workflow.
+"""
+
 import json
 import os
 import sys
@@ -7,7 +14,7 @@ from typing import List
 from database.db import save_instances
 from executor.runner import execute_command
 from generators.ansible_gen import generate_ansible
-from generators.terraform_gen import generate_terraform
+from generators.terraform_gen import generate_terraform, instance_name_base
 from models.schemas import DeploymentRequest
 from services.prometheus_targets import rewrite_targets
 
@@ -125,7 +132,15 @@ async def run_local_deployment(
     mode: str,
     log: LogFn,
     deployment_id: str | None = None,
+    extra_env: dict | None = None,
+    ssh_key_path: str | None = None,
 ) -> ExecutionResult:
+    """
+    `extra_env` carries the user's AWS credentials for Terraform; when None the
+    process environment is used (the GitHub Actions workflow exports them).
+    `ssh_key_path` points at the user's private key; when None we fall back to
+    SSH_KEY_DIR/<key_pair_name>.pem.
+    """
     await log(f"[{_ts()}] Starting {'plan' if mode == 'plan' else 'deployment'}")
     await log(f"[{_ts()}] Work directory: {work_dir}")
 
@@ -142,12 +157,12 @@ async def run_local_deployment(
     await log(f"[{_ts()}] setup.yml written")
 
     await log(f"[{_ts()}] Running: terraform init")
-    async for line in execute_command(["terraform", "init", "-no-color"], work_dir):
+    async for line in execute_command(["terraform", "init", "-no-color", "-input=false"], work_dir, extra_env):
         await log(f"[TERRAFORM] {line}")
 
     if mode == "plan":
         await log(f"[{_ts()}] Running: terraform plan")
-        async for line in execute_command(["terraform", "plan", "-no-color"], work_dir):
+        async for line in execute_command(["terraform", "plan", "-no-color", "-input=false"], work_dir, extra_env):
             await log(f"[TERRAFORM] {line}")
 
         await log(f"[{_ts()}] Terraform plan completed successfully")
@@ -155,13 +170,15 @@ async def run_local_deployment(
 
     await log(f"[{_ts()}] Running: terraform apply")
     async for line in execute_command(
-        ["terraform", "apply", "-auto-approve", "-no-color"], work_dir
+        ["terraform", "apply", "-auto-approve", "-no-color", "-input=false"],
+        work_dir,
+        extra_env,
     ):
         await log(f"[TERRAFORM] {line}")
 
     await log(f"[{_ts()}] Fetching terraform outputs")
     output_lines: List[str] = []
-    async for line in execute_command(["terraform", "output", "-json"], work_dir):
+    async for line in execute_command(["terraform", "output", "-json"], work_dir, extra_env):
         output_lines.append(line)
 
     ips: List[str] = []
@@ -188,16 +205,20 @@ async def run_local_deployment(
         await log(f"[INFO]   Server {index}: {ip}")
 
     ssh_user = "ubuntu" if request.os_type == "ubuntu" else "ec2-user"
-    ssh_key_path = f"{DEFAULT_SSH_KEY_DIR}/{request.key_pair_name}.pem"
+    ssh_key_path = ssh_key_path or f"{DEFAULT_SSH_KEY_DIR}/{request.key_pair_name}.pem"
 
     if deployment_id and instance_ids:
         monitoring_enabled = "node_exporter" in [pkg.lower() for pkg in request.packages]
+        name_base = instance_name_base(request)
         persisted: List[dict] = []
         for index, tf_id in enumerate(instance_ids):
+            # Mirror the tags Terraform applied (see generators/terraform_gen.py).
             tags = {
-                "Name": f"devops-portal-server-{index + 1}",
+                "Name": f"{name_base}-{index + 1}",
+                "Project": "devops-portal",
                 "Environment": "devops-portal",
                 "ManagedBy": "DevOpsAutomationPortal",
+                "PortalDeploymentId": deployment_id,
             }
             if monitoring_enabled:
                 tags["monitoring"] = "enabled"
