@@ -1,0 +1,166 @@
+name: Portal Infrastructure
+
+# Plans and applies devops-portal/infra/terraform: the portal host's EC2
+# instance, Elastic IP, security group, IAM roles and SSM configuration.
+# (Application releases onto that host are portal-release.yml.)
+#
+#   pull_request              -> plan (read-only role)
+#   push to main              -> plan -> apply   (environment portal-infra)
+#   workflow_dispatch plan    -> plan (read-only role)
+#   workflow_dispatch apply   -> plan -> apply   (environment portal-infra)
+#
+# Every plan fails if it would destroy or replace a resource - replacing the
+# instance wipes the portal's database. A manual apply with allow_replace=true
+# is the only way through.
+#
+# AWS access is keyless via OIDC; both roles and the state bucket come from
+# devops-portal/infra/github-deploy-role.yaml. Repository variables:
+#   PORTAL_INFRA_ROLE_ARN       - stack output DeployRoleArn
+#   PORTAL_INFRA_PLAN_ROLE_ARN  - stack output PlanRoleArn
+#   PORTAL_HTTP_INGRESS_CIDRS   - JSON list allowed to reach the portal, e.g. ["203.0.113.7/32"]
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "devops-portal/infra/terraform/**"
+      - "devops-portal/infra/scripts/check-plan.sh"
+      - ".github/workflows/portal-infra.yml"
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - "devops-portal/infra/terraform/**"
+      - "devops-portal/infra/scripts/check-plan.sh"
+      - ".github/workflows/portal-infra.yml"
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Plan only, or plan and apply
+        type: choice
+        options: [plan, apply]
+        default: plan
+      allow_replace:
+        description: Let apply destroy or replace resources (e.g. the portal host)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portal-infra
+  cancel-in-progress: false
+
+env:
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+  TF_VERSION: 1.14.7
+  TF_WORKING_DIR: devops-portal/infra/terraform
+  TF_VAR_http_ingress_cidrs: ${{ vars.PORTAL_HTTP_INGRESS_CIDRS }}
+
+jobs:
+  plan:
+    name: Plan
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.action == 'plan')
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Check repository variables
+        run: |
+          if [ -z "$TF_VAR_http_ingress_cidrs" ]; then
+            echo "::error::Set the PORTAL_HTTP_INGRESS_CIDRS repository variable, e.g. [\"203.0.113.7/32\"]"
+            exit 1
+          fi
+
+      - name: Configure AWS credentials (OIDC, read-only)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.PORTAL_INFRA_PLAN_ROLE_ARN }}
+          aws-region: ap-south-1
+
+      - name: Terraform fmt / init / validate
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          terraform fmt -check -recursive
+          terraform init
+          terraform validate
+
+      # The plan role cannot write the lockfile, so this plan does not lock.
+      - name: Terraform plan
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform plan -lock=false -out=tfplan
+
+      - name: Summarise plan and block destroy/replace
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        env:
+          ALLOW_REPLACE: "false"
+        run: bash ../scripts/check-plan.sh tfplan
+
+  apply:
+    name: Apply
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.action == 'apply')
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    # Add required reviewers to this environment to gate every apply.
+    environment: portal-infra
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Check repository variables
+        run: |
+          if [ -z "$TF_VAR_http_ingress_cidrs" ]; then
+            echo "::error::Set the PORTAL_HTTP_INGRESS_CIDRS repository variable, e.g. [\"203.0.113.7/32\"]"
+            exit 1
+          fi
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.PORTAL_INFRA_ROLE_ARN }}
+          aws-region: ap-south-1
+
+      - name: Terraform init / validate
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          terraform init
+          terraform validate
+
+      - name: Terraform plan
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform plan -out=tfplan
+
+      - name: Summarise plan and block destroy/replace
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        env:
+          ALLOW_REPLACE: ${{ inputs.allow_replace || false }}
+        run: bash ../scripts/check-plan.sh tfplan
+
+      - name: Terraform apply
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform apply tfplan
+
+      - name: Outputs
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          {
+            echo "### Portal host"
+            echo '```'
+            terraform output
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

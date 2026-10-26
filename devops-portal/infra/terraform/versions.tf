@@ -1,10 +1,19 @@
 # Hosting for the DevOps portal itself (not the instances users deploy).
 #
-# State is local on purpose: this stack is applied once by an operator (see
-# docs/demo-runbook.md). Day-to-day releases go through
-# .github/workflows/portal-release.yml, which only talks to SSM.
+# Planned and applied by .github/workflows/portal-infra.yml. State lives in
+# the bucket created by ../github-deploy-role.yaml, locked with an S3 lockfile.
+# Day-to-day releases go through .github/workflows/portal-release.yml, which
+# only talks to SSM.
 terraform {
-  required_version = ">= 1.6"
+  required_version = ">= 1.10"
+
+  backend "s3" {
+    bucket       = "devops-portal-tfstate-818651033439"
+    key          = "portal-host/terraform.tfstate"
+    region       = "ap-south-1"
+    encrypt      = true
+    use_lockfile = true
+  }
 
   required_providers {
     aws = {
