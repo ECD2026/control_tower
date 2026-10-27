@@ -55,7 +55,7 @@ flowchart LR
 
 | Component | Code | Role |
 |---|---|---|
-| **Frontend** | `devops-portal/frontend` | React SPA (Vite + Tailwind), served by nginx. nginx is also the reverse proxy and the login gate for Grafana/Prometheus (`nginx.conf`). |
+| **Frontend** | `devops-portal/frontend` | React SPA (Vite + Tailwind), served by nginx. nginx is also the reverse proxy and the login gate for Grafana/Prometheus (`nginx.conf`). Destructive actions (terminate instances, delete credentials, delete or clear deployment history) ask for confirmation in an on-screen modal, `components/ConfirmDialog.jsx` (`useDialog`); the UI never uses the browser's `confirm`/`alert`. |
 | **Backend** | `devops-portal/backend` | FastAPI. Auth, credentials, deployments, instance actions, reconcile loop. |
 | **CloudWatch exporter** | `backend/exporters/cloudwatch_exporter.py` | Separate process (same image). Reads the portal DB, pulls CloudWatch metrics per account/region, serves them on `:9106`. |
 | **Prometheus** | `monitoring/prometheus/prometheus.yml` | Scrapes the exporter (all instances) and node_exporter (instances that installed it). |
